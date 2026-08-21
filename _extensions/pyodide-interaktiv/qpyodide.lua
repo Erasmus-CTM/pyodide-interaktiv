@@ -93,6 +93,15 @@ local feedbackStorage = "local"
 local feedbackHints = "true"
 
 ----
+--- Setup variables for non-interactive output formats (PDF, docx, ...)
+
+-- Whether `{pyodide-python}` cells fall back to plain, Python-highlighted
+-- source in formats where the Pyodide/WASM runtime never runs. Off by
+-- default -- opt in via `pyodide: pdf-fallback: true` document-wide, or
+-- `#| pdf-fallback: true` on an individual cell.
+local pdfFallback = "false"
+
+----
 --- Setup variables for tracking number of code cells
 
 -- Define a counter variable
@@ -111,6 +120,7 @@ local qPyodideDefaultCellOptions = {
   ["output"] = "true",
   ["comment"] = "",
   ["code-fold"] = "",
+  ["pdf-fallback"] = "",
   ["label"] = "",
   ["autorun"] = "",
   ["classes"] = "",
@@ -270,6 +280,13 @@ local function setPyodideInitializationOptions(meta)
   -- Enable/disable progressive hints. Default: true
   if isVariablePopulated(pyodide['feedback-hints']) then
     feedbackHints = pandoc.utils.stringify(pyodide["feedback-hints"])
+  end
+
+  -- Document-wide default for the PDF/non-interactive fallback. Default:
+  -- false (unchanged legacy behavior). Overridable per cell via
+  -- `#| pdf-fallback: ...`.
+  if isVariablePopulated(pyodide['pdf-fallback']) then
+    pdfFallback = pandoc.utils.stringify(pyodide["pdf-fallback"])
   end
 
   -- Attempt to install different packages.
@@ -607,16 +624,47 @@ local function extractCodeBlockOptions(block)
   return cellCode, cellOptions
 end
 
+-- Interpret a `pdf-fallback` value (document- or cell-level, always a raw
+-- string coming out of YAML/`#|` parsing) as on/off.
+local function isPdfFallbackEnabled(value)
+  if isVariableEmpty(value) then
+    return false
+  end
+  local normalized = tostring(value):lower()
+  return normalized == "true" or normalized == "python" or normalized == "1"
+end
 
 -- Transform a {pyodide-python} code block into a Pyodide interactive editor.
 local function enablePyodideCodeCell(el)
 
-  -- Only process HTML output; skip markdown previews in VS Code / RStudio
-  if not (el.attr and (quarto.doc.is_format("html") or quarto.doc.is_format("markdown"))) then
+  -- Not a Pyodide cell: leave untouched regardless of output format.
+  if not (el.attr and el.attr.classes:includes("{pyodide-python}")) then
     return el
   end
 
-  if not el.attr.classes:includes("{pyodide-python}") then
+  -- Non-interactive output formats (PDF, docx, ...): the client-side
+  -- Pyodide/WASM runtime never runs here, and Quarto's own execution
+  -- engines already skipped this block during the compute phase (that's
+  -- the whole point of the non-standard "pyodide-python" language tag) --
+  -- so there is no computed output to show. Opt-in via
+  -- `pyodide: pdf-fallback: true` (document-wide) or `#| pdf-fallback:
+  -- true` (per cell, overrides the document default) to present the
+  -- source as normal, properly highlighted Python instead of the raw,
+  -- unstyled `{pyodide-python}` block; the `#|` cell-option comments that
+  -- a real Python engine would otherwise have hidden are stripped either
+  -- way. Off by default: the block passes through unchanged.
+  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+    local cellCode, cellOptions = extractCodeBlockOptions(el)
+
+    local fallback = pdfFallback
+    if isVariablePopulated(cellOptions["pdf-fallback"]) then
+      fallback = cellOptions["pdf-fallback"]
+    end
+
+    if isPdfFallbackEnabled(fallback) then
+      return pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, {"python"}, {}))
+    end
+
     return el
   end
 

@@ -126,6 +126,7 @@ Can be disabled via `feedback-hints: false`.
 | `read-only` | `false` | make the editor read-only (no Feedback button) |
 | `autorun` | — | `true`: run the code automatically after Pyodide starts |
 | `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
+| `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset |
 | `label` | — | unique ID of the cell (`data-id` attribute) |
 | `classes` | — | additional CSS classes |
 | `fig-cap` | — | caption for plots |
@@ -144,6 +145,7 @@ pyodide:
   feedback: true                 # show AI feedback buttons (default: true)
   feedback-storage: local        # default: local | session
   feedback-hints: true           # progressive hints (default: true)
+  pdf-fallback: false            # PDF/docx: highlight {pyodide-python} as plain Python (default: false)
   lang: de                       # UI language (default: en)
 ```
 
