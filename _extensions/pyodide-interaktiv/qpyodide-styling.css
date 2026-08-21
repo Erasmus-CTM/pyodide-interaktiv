@@ -188,6 +188,11 @@ fieldset:disabled .qpyodide-button {
   color: var(--bs-danger, #db4133);
 }
 
+.qpyodide-feedback-error-gear {
+  display: block;
+  margin-top: 0.5rem;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Settings panel (set up AI feedback)                                    */
 
@@ -667,6 +672,33 @@ body.quarto-dark .qpyodide-cell-input-hint {
   color: var(--bs-body-color, #e9ecef);
   background: color-mix(in srgb, var(--bs-warning, #ffc107) 12%, var(--bs-secondary-bg, #343a40));
   border-color: color-mix(in srgb, var(--bs-warning, #ffc107) 30%, var(--bs-secondary-bg, #343a40));
+}
+
+/* Nudge shown under a manually-expanded cell, offering to reveal every
+   other still-folded cell in one go (see qpyodide-cell-classes.js). */
+.qpyodide-fold-nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85em;
+  line-height: 1.4;
+  color: var(--bs-body-color, #333);
+  background: var(--bs-info-bg-subtle, #cff4fc);
+  border: 1px solid var(--bs-info-border-subtle, #9eeaf9);
+  border-radius: 4px;
+}
+
+.qpyodide-fold-nudge span {
+  flex: 1 1 auto;
+}
+
+body.quarto-dark .qpyodide-fold-nudge {
+  color: var(--bs-body-color, #e9ecef);
+  background: color-mix(in srgb, var(--bs-info, #0dcaf0) 12%, var(--bs-secondary-bg, #343a40));
+  border-color: color-mix(in srgb, var(--bs-info, #0dcaf0) 30%, var(--bs-secondary-bg, #343a40));
 }
 
 body.quarto-dark .qpyodide-terminal-input {

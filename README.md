@@ -101,6 +101,14 @@ rejects one of the fields).
 Clicking **Feedback** generates a copyable text **including the system
 prompt**, which can be pasted into ChatGPT, Claude, etc.
 
+### Clicking Feedback before setup is done
+
+If a cell's Feedback button is clicked before the base URL/model are
+configured, the error message includes its own **⚙ button**. Clicking it
+moves the (single, shared) settings panel right into that cell, next to
+the error — no scrolling anywhere. Clicking the gear icon at the top of
+the page instead moves the panel back there.
+
 ### Progressive hints
 
 The hint level rises with each click of the Feedback button on the same
@@ -117,6 +125,7 @@ Can be disabled via `feedback-hints: false`.
 | `context` | `interactive` | `interactive`, `output`, or `setup` |
 | `read-only` | `false` | make the editor read-only (no Feedback button) |
 | `autorun` | — | `true`: run the code automatically after Pyodide starts |
+| `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
 | `label` | — | unique ID of the cell (`data-id` attribute) |
 | `classes` | — | additional CSS classes |
 | `fig-cap` | — | caption for plots |
@@ -141,6 +150,20 @@ pyodide:
 Packages imported in the code are additionally loaded on demand by Pyodide
 (`loadPackagesFromImports`). `requests`/`urllib3` are shimmed via
 `pyodide_http`, so `pd.read_csv(url)` works directly.
+
+Quarto's own standard `code-fold:` (document, profile, or project
+`_quarto.yml`) sets the default open/closed state of every interactive
+cell's code editor; no separate `pyodide:` option is needed. Enable
+`code-tools: true` as well to also get the page's "Show All Code"/"Hide
+All Code" toggle, which folds/unfolds pyodide cells alongside regular code
+blocks. Override it per cell with `#| code-fold: true`.
+
+If a reader manually expands one folded cell while at least two others
+are still folded, a small one-time hint appears underneath offering to
+reveal every remaining cell in one click ("Show all" / "No, thanks") —
+with only one other folded cell left, clicking it directly is no more
+effort, so the hint won't appear. Text is fully localized
+(see [UI language](#ui-language)).
 
 ---
 

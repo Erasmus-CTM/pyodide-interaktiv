@@ -267,7 +267,16 @@ async function runCell(code, wantPickle) {
     await pyodide.loadPackagesFromImports(code);
     resultValue = await pyodide.runPythonAsync(code);
   } catch (err) {
-    runEntries.push({ message: String(err), type: "stderr" });
+    // An uncaught Python exception never goes through the stdout/stderr
+    // callbacks above (those only see explicit prints); runPythonAsync
+    // instead rejects with the formatted traceback as its message. Stream
+    // it live too - interactive cells only render stdout/stderr via the
+    // live stream (see runCode() in qpyodide-cell-classes.js), not from
+    // this function's return value, so without this an uncaught exception
+    // would silently show nothing at all in the terminal.
+    const message = String(err);
+    runEntries.push({ message: message, type: "stderr" });
+    self.postMessage({ type: "streamStderr", text: message });
   }
 
   let html = null;

@@ -110,6 +110,7 @@ local qPyodideDefaultCellOptions = {
   ["read-only"] = "false",
   ["output"] = "true",
   ["comment"] = "",
+  ["code-fold"] = "",
   ["label"] = "",
   ["autorun"] = "",
   ["classes"] = "",
@@ -484,6 +485,91 @@ local function qPyodideJSCellInsertionCode(counter)
   return insertionLocation .. noscriptWarning
 end
 
+-- Bridge to Quarto's own resolved document/project/profile-level options
+-- (`code-fold:` today; the same primitive works for any other key Quarto
+-- resolves the same way, e.g. `echo`, `eval`, `warning`, `code-summary`).
+--
+-- Quarto resolves these (project + profile + document, with format-level
+-- defaulting) into a `param()` lookup that its own *core* filters (bundled
+-- in main.lua) call as a bare global -- but that global is only injected
+-- into main.lua's Lua state, not into the separate sandbox extension
+-- filters run in (confirmed empirically: `param` is undefined here, while
+-- `_G.param` still resolves to the same function via the shared top-level
+-- `_G` table). There is no documented public replacement for this in the
+-- extension Lua API as of Quarto 1.8 (`quarto.metadata.get` exists but
+-- does not return format params such as `code-fold`). Reached defensively
+-- so a future Quarto release that removes this can only make resolved
+-- values fall back to "not set", never error out.
+local function readDocumentQuartoParam(name)
+  local paramFn = rawget(_G, "param")
+  if type(paramFn) ~= "function" then
+    return nil
+  end
+  local ok, value = pcall(paramFn, name)
+  if not ok then
+    return nil
+  end
+  return value
+end
+
+local function stringifyQuartoParam(value)
+  if value == nil then
+    return nil
+  elseif type(value) == "boolean" or type(value) == "number" then
+    return tostring(value)
+  elseif type(value) == "string" then
+    return value
+  end
+  local ok, result = pcall(pandoc.utils.stringify, value)
+  if ok then
+    return result
+  end
+  return nil
+end
+
+-- Resolve one Quarto-native option for a cell: the cell's own `#| <name>:`
+-- override takes precedence over Quarto's document/project/profile-level
+-- default for the same key; `fallback` applies when neither is set.
+-- Returns the resolved value lowercased (raw strings/booleans/numbers
+-- only -- callers interpret the result themselves, same as Quarto's own
+-- `foldAttribute()`/`attribute()` helpers do for their respective option).
+local function resolveQuartoParam(name, cellOverride, fallback)
+  local raw
+
+  if isVariablePopulated(cellOverride) then
+    raw = cellOverride
+  else
+    raw = stringifyQuartoParam(readDocumentQuartoParam(name))
+  end
+
+  if raw == nil or raw == "" then
+    return fallback
+  end
+
+  return raw:lower()
+end
+
+-- Resolve the initial fold state ("hide" = start collapsed, "show" = start
+-- expanded) for one pyodide cell, mirroring Quarto's own `foldAttribute()`
+-- (see share/filters/main.lua -> foldcode.lua) so that this extension picks
+-- up the exact same `code-fold` setting Quarto's native code-fold uses.
+--
+-- Precedence:
+--   1. `#| code-fold: ...` set directly on the cell
+--   2. Quarto's own `code-fold:` -- document YAML, a profile, or the
+--      project's `_quarto.yml`.
+--   3. Neither set -> "show" (previous, unconditional default is preserved)
+local function resolveFoldState(cellOverride)
+  local resolved = resolveQuartoParam("code-fold", cellOverride, "show")
+
+  if resolved == "true" or resolved == "1" or resolved == "hide" then
+    return "hide"
+  else
+    -- Covers "false", "0", "show", "none", and anything unrecognized.
+    return "show"
+  end
+end
+
 -- Extract Quarto code cell options from the block's text
 local function extractCodeBlockOptions(block)
 
@@ -543,6 +629,11 @@ local function enablePyodideCodeCell(el)
 
   -- Convert cell-specific option commands into attributes
   cellCode, cellOptions = extractCodeBlockOptions(el)
+
+  -- Resolve the initial fold state against Quarto's own `code-fold`
+  -- (document/project/profile), with the cell's own `#| code-fold:` taking
+  -- precedence. Overwrites the raw option with the resolved "hide"/"show".
+  cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
 
   -- Modify the counter variable each time this is run to create
   -- unique code cells

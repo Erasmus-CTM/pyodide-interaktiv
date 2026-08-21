@@ -193,8 +193,18 @@ function qfRenderMarkdownLite(text) {
   return html;
 }
 
-function qfRenderFeedback(targetDiv, feedbackText, hintLevel) {
+// The settings panel can be living inside `targetDiv` (qfOpenSettingsNear
+// moved it there earlier); wiping innerHTML would silently detach it. Move
+// it back home first so it's never lost, just relocated.
+function qfClearTargetDiv(targetDiv) {
+  if (qfUi.panel && qfUi.homeParent && targetDiv.contains(qfUi.panel)) {
+    qfUi.homeParent.appendChild(qfUi.panel);
+  }
   targetDiv.innerHTML = "";
+}
+
+function qfRenderFeedback(targetDiv, feedbackText, hintLevel) {
+  qfClearTargetDiv(targetDiv);
 
   const header = document.createElement("div");
   header.className = "qpyodide-feedback-header";
@@ -210,8 +220,11 @@ function qfRenderFeedback(targetDiv, feedbackText, hintLevel) {
   targetDiv.classList.add("has-content");
 }
 
-function qfRenderError(targetDiv, message) {
-  targetDiv.innerHTML = "";
+// `showSettingsLink`: adds a button that relocates the settings panel
+// right into `targetDiv` instead of making the reader hunt for the gear
+// icon at the top of the page - used for the "not configured yet" error.
+function qfRenderError(targetDiv, message, { showSettingsLink = false } = {}) {
+  qfClearTargetDiv(targetDiv);
 
   const box = document.createElement("div");
   box.className = "qpyodide-feedback-error";
@@ -221,6 +234,19 @@ function qfRenderError(targetDiv, message) {
   text.textContent = message;
   box.appendChild(header);
   box.appendChild(text);
+
+  if (showSettingsLink) {
+    const gearBtn = document.createElement("button");
+    gearBtn.type = "button";
+    gearBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-feedback-error-gear";
+    gearBtn.innerHTML = '<i class="fa-solid fa-gear"></i> ' + QP_L.gearTitle;
+    // Moves the settings panel right into this cell's feedback area
+    // (appended after `box` below) instead of sending the reader to the
+    // top of the page.
+    gearBtn.onclick = () => qfOpenSettingsNear(targetDiv);
+    box.appendChild(gearBtn);
+  }
+
   targetDiv.appendChild(box);
 
   targetDiv.classList.add("has-content");
@@ -228,7 +254,7 @@ function qfRenderError(targetDiv, message) {
 
 // Box with a copyable prompt ("Copy prompt" mode, including the system prompt)
 function qfRenderCopyPrompt(targetDiv, promptText) {
-  targetDiv.innerHTML = "";
+  qfClearTargetDiv(targetDiv);
 
   const header = document.createElement("div");
   header.className = "qpyodide-feedback-header";
@@ -509,7 +535,17 @@ function qfBuildSettingsUI() {
     panel.style.display = collapsed ? "none" : "block";
   }
 
-  toggleBtn.onclick = () => setCollapsed(panel.style.display !== "none");
+  // The panel can be relocated next to a cell's "not configured" error (see
+  // qfOpenSettingsNear below); the header gear reclaims it back here rather
+  // than blindly toggling whatever display state it was left in there.
+  toggleBtn.onclick = () => {
+    if (panel.parentElement !== qfUi.homeParent) {
+      qfUi.homeParent.appendChild(panel);
+      setCollapsed(false);
+    } else {
+      setCollapsed(panel.style.display !== "none");
+    }
+  };
   infoBtn.onclick = () => {
     helpDiv.style.display = (helpDiv.style.display === "none") ? "block" : "none";
   };
@@ -551,14 +587,24 @@ function qfBuildSettingsUI() {
       : document.body.prepend(wrap);
   }
 
-  // Attach the settings panel below the status row
+  // Attach the settings panel below the status row. Its parent here is
+  // also the panel's "home": qfOpenSettingsNear() can relocate the panel
+  // next to a cell's error, and the header gear (above) moves it back here.
   const panelsArea = document.getElementById("qpyodide-status-panels");
-  if (panelsArea) {
-    panelsArea.appendChild(panel);
-  } else {
-    const statusArea = document.getElementById("qpyodide-status-message-area");
-    (statusArea ?? document.body).appendChild(panel);
-  }
+  const statusArea = document.getElementById("qpyodide-status-message-area");
+  qfUi.homeParent = panelsArea ?? statusArea ?? document.body;
+  qfUi.homeParent.appendChild(panel);
+}
+
+// Moves the (single, shared) settings panel right next to `container` and
+// opens it there - called from the "not configured yet" error box so the
+// reader can fix it on the spot instead of hunting for the gear icon at
+// the top of the page. The header gear (qfBuildSettingsUI above) moves the
+// panel back to its home position when clicked.
+function qfOpenSettingsNear(container) {
+  if (!qfUi.panel || !container) return;
+  container.appendChild(qfUi.panel);
+  if (qfUi.setCollapsed) qfUi.setCollapsed(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -600,8 +646,9 @@ async function qfGiveFeedback(unit) {
 
     // Direct API: check configuration (key is optional, e.g. for Ollama)
     if (!cfg.baseUrl || !cfg.model) {
-      qfRenderError(targetDiv, QP_L.errConfigMissing);
-      if (qfUi.setCollapsed) qfUi.setCollapsed(false);
+      // The error's own ⚙ button (qfOpenSettingsNear) moves the settings
+      // panel right here on demand - nothing to pre-open before that.
+      qfRenderError(targetDiv, QP_L.errConfigMissing, { showSettingsLink: true });
       return;
     }
 
@@ -633,7 +680,10 @@ globalThis.qpyodideFeedback = {
   attach(unit) {
     if (!this.enabled || !unit.feedbackButton) return;
     unit.feedbackButton.onclick = () => qfGiveFeedback(unit);
-  }
+  },
+
+  /** Opens and scrolls to the settings panel. */
+  openSettings: qfOpenSettingsNear
 };
 
 // Build the settings panel (modules are deferred, so the DOM is ready)

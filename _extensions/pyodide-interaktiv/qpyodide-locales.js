@@ -28,6 +28,9 @@ globalThis.qpyodideLocales = {
     feedbackTitle:       "AI feedback on the current code",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
     showPythonCode:      "Show Python code",
+    foldNudgeQuestion:   "Show all code cells?",
+    foldNudgeShowAll:    "Show all",
+    foldNudgeDismiss:    "No, thanks",
     addCodeBlockTitle:   "Append an additional code block",
     addCodeBlockLabel:   '<i class="fa-solid fa-plus"></i> Code block',
     runAtStartup:        "Runs at startup …",
@@ -191,7 +194,8 @@ globalThis.qpyodideLocales = {
     errNoContent:        "The API response contains no feedback text (field choices[0].message.content is missing).",
     errTokenRejected:    "The API rejected the request repeatedly (token parameter).",
     errConfigMissing:
-      "Please click the ⚙ icon above first and enter a base URL and a model " +
+      "Please set up your AI feedback first – using the button right here, " +
+      "or the ⚙ icon above – and enter a base URL and a model " +
       "(or choose the \"copy prompt\" mode).",
 
     // --- Settings panel ---------------------------------------------------------
@@ -261,6 +265,9 @@ globalThis.qpyodideLocales = {
     feedbackTitle:       "KI-Feedback zum aktuellen Code",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
     showPythonCode:      "Python-Code anzeigen",
+    foldNudgeQuestion:   "Alle Code-Zellen anzeigen?",
+    foldNudgeShowAll:    "Alle anzeigen",
+    foldNudgeDismiss:    "Nein, danke",
     addCodeBlockTitle:   "Zusätzlichen Codeblock anhängen",
     addCodeBlockLabel:   '<i class="fa-solid fa-plus"></i> Codeblock',
     runAtStartup:        "Wird beim Start ausgeführt …",
@@ -425,8 +432,9 @@ globalThis.qpyodideLocales = {
     errNoContent:        "Die API-Antwort enthält keinen Feedback-Text (Feld choices[0].message.content fehlt).",
     errTokenRejected:    "Die API hat die Anfrage wiederholt abgelehnt (Token-Parameter).",
     errConfigMissing:
-      "Bitte zuerst das ⚙-Symbol oben anklicken und Base URL sowie Modell angeben " +
-      "(oder den Modus „Prompt kopieren“ wählen).",
+      "Bitte richte zuerst dein KI-Feedback ein – über den Button hier oder " +
+      "das ⚙-Symbol oben – und gib Base URL sowie Modell an " +
+      "(oder wähle den Modus „Prompt kopieren“).",
 
     // --- Settings panel ---------------------------------------------------------
     gearTitle:           "KI-Feedback einrichten",
@@ -495,6 +503,9 @@ globalThis.qpyodideLocales = {
     feedbackTitle:       "AI-feedback på den aktuella koden",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
     showPythonCode:      "Visa Python-koden",
+    foldNudgeQuestion:   "Visa alla kodceller?",
+    foldNudgeShowAll:    "Visa alla",
+    foldNudgeDismiss:    "Nej tack",
     addCodeBlockTitle:   "Lägg till ytterligare ett kodblock",
     addCodeBlockLabel:   '<i class="fa-solid fa-plus"></i> Kodblock',
     runAtStartup:        "Körs vid start …",
@@ -659,7 +670,8 @@ globalThis.qpyodideLocales = {
     errNoContent:        "API-svaret innehåller ingen feedbacktext (fältet choices[0].message.content saknas).",
     errTokenRejected:    "API:et avvisade förfrågan upprepade gånger (token-parameter).",
     errConfigMissing:
-      "Klicka först på ⚙-symbolen ovan och ange Base URL samt modell " +
+      "Ställ först in din AI-feedback – med knappen här eller ⚙-symbolen " +
+      "ovan – och ange Base URL samt modell " +
       "(eller välj läget ”Kopiera prompten”).",
 
     // --- Settings panel ---------------------------------------------------------
@@ -729,6 +741,9 @@ globalThis.qpyodideLocales = {
     feedbackTitle:       "KI-tilbakemelding på den gjeldende koden",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Tilbakemelding',
     showPythonCode:      "Vis Python-koden",
+    foldNudgeQuestion:   "Vis alle kodeceller?",
+    foldNudgeShowAll:    "Vis alle",
+    foldNudgeDismiss:    "Nei takk",
     addCodeBlockTitle:   "Legg til enda en kodeblokk",
     addCodeBlockLabel:   '<i class="fa-solid fa-plus"></i> Kodeblokk',
     runAtStartup:        "Kjøres ved oppstart …",
@@ -893,7 +908,8 @@ globalThis.qpyodideLocales = {
     errNoContent:        "API-svaret inneholder ingen tilbakemeldingstekst (feltet choices[0].message.content mangler).",
     errTokenRejected:    "API-et avviste forespørselen gjentatte ganger (token-parameter).",
     errConfigMissing:
-      "Klikk først på ⚙-symbolet ovenfor og oppgi Base URL og modell " +
+      "Sett først opp AI-tilbakemeldingen din – med knappen her eller " +
+      "⚙-symbolet ovenfor – og oppgi Base URL og modell " +
       "(eller velg modusen «Kopier prompten»).",
 
     // --- Settings panel ---------------------------------------------------------
@@ -963,6 +979,9 @@ globalThis.qpyodideLocales = {
     feedbackTitle:       "AI-feedback på den aktuelle kode",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
     showPythonCode:      "Vis Python-koden",
+    foldNudgeQuestion:   "Vis alle kodeceller?",
+    foldNudgeShowAll:    "Vis alle",
+    foldNudgeDismiss:    "Nej tak",
     addCodeBlockTitle:   "Tilføj endnu en kodeblok",
     addCodeBlockLabel:   '<i class="fa-solid fa-plus"></i> Kodeblok',
     runAtStartup:        "Køres ved opstart …",
@@ -1127,7 +1146,8 @@ globalThis.qpyodideLocales = {
     errNoContent:        "API-svaret indeholder ingen feedbacktekst (feltet choices[0].message.content mangler).",
     errTokenRejected:    "API-et afviste anmodningen gentagne gange (token-parameter).",
     errConfigMissing:
-      "Klik først på ⚙-symbolet ovenfor, og angiv Base URL samt model " +
+      "Opsæt først din AI-feedback – med knappen her eller ⚙-symbolet " +
+      "ovenfor – og angiv Base URL samt model " +
       "(eller vælg tilstanden »Kopiér prompten«).",
 
     // --- Settings panel ---------------------------------------------------------

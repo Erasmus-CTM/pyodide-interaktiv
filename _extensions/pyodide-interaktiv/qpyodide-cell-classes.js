@@ -732,6 +732,74 @@ class BaseCell {
   async runStartup() { /* default: nothing to do */ }
 }
 
+// ---------------------------------------------------------------------------
+// Fold nudge: shown once, under a cell the reader just expanded by hand,
+// offering to reveal every other still-folded cell in one click.
+// ---------------------------------------------------------------------------
+
+// Sets a fold <details>'s open state programmatically, marking it via the
+// data attribute ONLY when the state actually changes. A same-state
+// assignment (e.g. `.open = false` on a <details> that's already closed,
+// the common case for a cell that starts folded) never fires a `toggle`
+// event at all - flagging it anyway would leave the flag stuck forever,
+// silently swallowing that cell's next *real* user click instead of the
+// (nonexistent) programmatic event it was meant for. Used everywhere a
+// fold state is set from code: initial cell construction, "Show/Hide All
+// Code", and this nudge's own "show all" button.
+function qpyodideSetFoldOpen(details, open) {
+  if (details.open === open) return;
+  details.dataset.qpyodideProgrammatic = "1";
+  details.open = open;
+}
+globalThis.qpyodideSetFoldOpen = qpyodideSetFoldOpen;
+
+let qpyodideFoldNudgeShown = false;
+
+function qpyodideShowFoldNudge(cellDetails) {
+  if (qpyodideFoldNudgeShown) return;
+  // Only worth offering the shortcut when there's a real batch left to
+  // reveal. If a single other cell is still folded, clicking it directly
+  // is no more effort than clicking the nudge's own button, so it would
+  // just be a nag for no benefit.
+  const otherFoldedCount = Array.from(document.querySelectorAll(".qpyodide-code-fold"))
+    .filter((details) => details !== cellDetails && !details.open).length;
+  if (otherFoldedCount < 2) return;
+
+  qpyodideFoldNudgeShown = true;
+
+  const banner = document.createElement("div");
+  banner.className = "qpyodide-fold-nudge";
+
+  const text = document.createElement("span");
+  text.textContent = QP_L.foldNudgeQuestion;
+  banner.appendChild(text);
+
+  const showAllBtn = document.createElement("button");
+  showAllBtn.type = "button";
+  showAllBtn.className = "btn btn-light btn-sm qpyodide-button";
+  showAllBtn.textContent = QP_L.foldNudgeShowAll;
+  showAllBtn.onclick = () => {
+    document.querySelectorAll(".qpyodide-code-fold").forEach((details) => {
+      qpyodideSetFoldOpen(details, true);
+    });
+    banner.remove();
+  };
+  banner.appendChild(showAllBtn);
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "btn btn-light btn-sm qpyodide-button";
+  dismissBtn.textContent = QP_L.foldNudgeDismiss;
+  dismissBtn.onclick = () => banner.remove();
+  banner.appendChild(dismissBtn);
+
+  // Appended *inside* the <details> (not as a sibling after it): a closed
+  // <details> natively hides its children, so folding this cell back up
+  // hides the banner along with it instead of leaving it stranded on the
+  // page for a reader who never clicks either button.
+  cellDetails.appendChild(banner);
+}
+
 /**
  * InteractiveCell – collapsible cell with one (or, via "+ Code block",
  * two) EditorUnit(s).
@@ -754,9 +822,25 @@ class InteractiveCell extends BaseCell {
       mainDiv.setAttribute("data-id", this.options.label);
     }
 
-    // Collapsible frame around the whole cell
+    // Collapsible frame around the whole cell. Initial open/closed state
+    // follows Quarto's `code-fold` (document/project default or this
+    // cell's own `#| code-fold:` override), resolved ahead of time by the
+    // Lua filter into this.options["code-fold"] ("hide" or "show").
     const details = document.createElement("details");
-    details.open = true;
+    details.className = "qpyodide-code-fold";
+    qpyodideSetFoldOpen(details, this.options["code-fold"] !== "hide");
+    // Distinguishes a reader manually opening this cell from any
+    // programmatic change (initial state above, "Show/Hide All Code",
+    // or the nudge's own "show all" button) via the flag those set.
+    details.addEventListener("toggle", () => {
+      if (details.dataset.qpyodideProgrammatic) {
+        delete details.dataset.qpyodideProgrammatic;
+        return;
+      }
+      if (details.open) {
+        qpyodideShowFoldNudge(details);
+      }
+    });
     const summary = document.createElement("summary");
     summary.textContent = QP_L.showPythonCode;
     details.appendChild(summary);
