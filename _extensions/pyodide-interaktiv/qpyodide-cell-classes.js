@@ -65,6 +65,28 @@ qpyodideSyncBsTheme();
 // because Python runs in the Web Worker.
 let qpyodideExecutionBusy = false;
 
+// Every EditorUnit capable of local-storage autosave registers itself here
+// so the settings gear (qpyodide-feedback.js) can refresh their save-button/
+// autosave-mode UI live, without a page reload, after the reader flips the
+// "autosave to this browser" or "manual save per cell" checkbox.
+const qpyodideStorageUnits = [];
+globalThis.qpyodideRefreshStorageUI = function () {
+  qpyodideStorageUnits.forEach((unit) => unit.refreshStorageUI());
+};
+// Called by "delete all local saves" in the settings gear, right after
+// qpyodideStorage.clearAll(): puts every currently mounted, storage-capable
+// cell's editor back to its original code (otherwise an already-restored
+// or already-edited editor would keep showing the now-deleted content, and
+// the very next keystroke would just save it right back -- see
+// EditorUnit.resetEditorToOriginal()) and re-derives each cell's status
+// label/clear button from (now-empty) storage.
+globalThis.qpyodideResetAllStorageUnits = function () {
+  qpyodideStorageUnits.forEach((unit) => {
+    unit.resetEditorToOriginal();
+    unit.updateStorageStatus(false);
+  });
+};
+
 // Detects input() calls in the code (same heuristic as runForOutput()).
 function qpyodideCodeHasInput(code) {
   return /\binput\s*\(/.test(code || "");
@@ -246,6 +268,24 @@ class EditorUnit {
     this.lastRunCode = null;   // code state of the last run
     this.lastOutput = null;    // text output of the last run (for the feedback cache)
 
+    // Local-storage autosave: whether this cell could EVER use storage at
+    // all -- editable, and not permanently opted out via the course
+    // author's own `#| local-storage: false`. This is fixed for the cell's
+    // lifetime and gates whether any storage DOM/listeners get built at
+    // all. It's deliberately independent of the document default, the
+    // reader's device-wide toggle, and manual-save mode -- those can all
+    // change live (see cellEnabled()/isManualMode(), always re-read fresh,
+    // never cached) without needing a page reload; see refreshStorageUI().
+    this.storageCapable = !this.isReadOnly && !!globalThis.qpyodideStorage &&
+      this.options["local-storage"] !== "false";
+    // Restoring previously saved code is NOT gated by whether saving is
+    // CURRENTLY allowed (doc default / reader toggle can be off right now)
+    // -- if something was saved while it WAS allowed, it must still show up
+    // here; otherwise turning the reader toggle off would look like it
+    // silently deleted the student's own code.
+    this.savedCode = this.storageCapable ? globalThis.qpyodideStorage.load(this.uid) : null;
+    this.saveTimer = null;
+
     this.buildDom();
     this.initMonaco();
     this.wireButtons();
@@ -263,9 +303,6 @@ class EditorUnit {
 
     const leftButtonsDiv = document.createElement("div");
     leftButtonsDiv.className = "qpyodide-editor-toolbar-left-buttons";
-
-    const middleToolBarDiv = document.createElement("div");
-    middleToolBarDiv.className = "qpyodide-editor-toolbar-middle";
 
     const rightButtonsDiv = document.createElement("div");
     rightButtonsDiv.className = "qpyodide-editor-toolbar-right-buttons";
@@ -285,12 +322,49 @@ class EditorUnit {
     }
     leftButtonsDiv.appendChild(this.runButton);
 
-    // Editable/read-only label
+    // Editable/read-only label -- left-oriented, next to the Run button.
     const readOnlyLabel = document.createElement("label");
     readOnlyLabel.className = "qpyodide-label qpyodide-readonly-label";
     readOnlyLabel.id = `qpyodide-readonly-label-${uid}`;
     readOnlyLabel.textContent = this.isReadOnly ? QP_L.labelReadOnly : QP_L.labelEditable;
-    middleToolBarDiv.appendChild(readOnlyLabel);
+    leftButtonsDiv.appendChild(readOnlyLabel);
+
+    // Local-storage status label + "save now"/"clear saved code" controls
+    // (only for cells that could ever use storage -- see storageCapable).
+    // Visibility of each is refreshed live (refreshStorageUI()), never
+    // fixed at construction time. Status label is right-oriented, ahead of
+    // the action buttons it describes.
+    this.storageStatusLabel = null;
+    this.saveButton = null;
+    this.clearSavedButton = null;
+    if (this.storageCapable) {
+      this.storageStatusLabel = document.createElement("span");
+      this.storageStatusLabel.className = "qpyodide-label qpyodide-storage-status";
+      this.storageStatusLabel.hidden = true;
+      rightButtonsDiv.appendChild(this.storageStatusLabel);
+
+      // Manual-save mode only (see refreshStorageUI): the reader has to
+      // click this explicitly instead of autosave saving as they type.
+      this.saveButton = document.createElement("button");
+      this.saveButton.className = "btn btn-light btn-xs qpyodide-button qpyodide-button-save-cell";
+      this.saveButton.type = "button";
+      this.saveButton.id = `qpyodide-button-save-cell-${uid}`;
+      this.saveButton.title = QP_L.saveCellTitle;
+      this.saveButton.innerHTML = '<i class="fa-solid fa-floppy-disk"></i>';
+      this.saveButton.hidden = true;
+      rightButtonsDiv.appendChild(this.saveButton);
+
+      this.clearSavedButton = document.createElement("button");
+      this.clearSavedButton.className = "btn btn-light btn-xs qpyodide-button qpyodide-button-clear-saved";
+      this.clearSavedButton.type = "button";
+      this.clearSavedButton.id = `qpyodide-button-clear-saved-${uid}`;
+      this.clearSavedButton.title = QP_L.clearSavedTitle;
+      this.clearSavedButton.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+      this.clearSavedButton.hidden = true;
+      rightButtonsDiv.appendChild(this.clearSavedButton);
+
+      qpyodideStorageUnits.push(this);
+    }
 
     // Reset button
     this.resetButton = document.createElement("button");
@@ -324,7 +398,6 @@ class EditorUnit {
     }
 
     this.toolbarDiv.appendChild(leftButtonsDiv);
-    this.toolbarDiv.appendChild(middleToolBarDiv);
     this.toolbarDiv.appendChild(rightButtonsDiv);
 
     // Console: editor + text output + feedback output
@@ -374,6 +447,147 @@ class EditorUnit {
     // First gate check based on the initial code (the editor doesn't exist
     // yet; getCode() falls back to this.code).
     this.updateInputGate();
+
+    // Reflect whether restored/saved code already exists for this cell, and
+    // set the save/clear buttons' initial visibility (autosave vs. manual
+    // mode, current enablement).
+    this.updateStorageStatus(this.savedCode != null);
+    this.refreshStorageUI();
+  }
+
+  /** Updates the "saved"/"restored"/"savable" status label. Pass
+   *  justRestored=true right after a fresh page load that restored
+   *  previously saved code, to show that fact once instead of the generic
+   *  "saved" wording. Sets `display` directly (not just the `hidden`
+   *  attribute) so this can never be left visible by a stray CSS rule
+   *  elsewhere overriding `[hidden]`.
+   *
+   *  A cell with nothing saved YET still gets a faint "Savable" marker
+   *  whenever it actually would persist if the student typed right now
+   *  (live cascading precedence: doc default + this cell's own override +
+   *  the reader's own toggle, via cellEnabled()) -- otherwise cascading
+   *  options were only ever visible after the fact, once something had
+   *  already been saved, which made it impossible to tell which cells on
+   *  an untouched page were live vs. structurally incapable (read-only /
+   *  `#| local-storage: false`) vs. capable-but-currently-disabled (doc
+   *  default off, no cell override). This is the ONE label state that
+   *  depends on cellEnabled() (live) rather than meaningfullySaved
+   *  (persisted) -- so, unlike the other two, it must disappear/reappear
+   *  live whenever the reader's own toggle changes, even with nothing ever
+   *  saved.
+   *
+   *  A stored entry that's byte-identical to the original code (the
+   *  student saved, then edited back to exactly the original -- or a
+   *  reload just re-loaded a save that never actually differed) is treated
+   *  as NOT meaningfully saved: "Restored"/"Saved" would be describing a
+   *  distinction that doesn't exist, and previously the only way to clear
+   *  that stuck label was the per-cell trash-can button even though
+   *  nothing was actually being restored differently from the original.
+   *  Checked against both the live editor content and the raw stored
+   *  string, since the editor may not exist yet (this runs once
+   *  synchronously before Monaco's async `require()` resolves) and manual-
+   *  save mode can leave them out of sync. */
+  updateStorageStatus(justRestored) {
+    if (!this.storageStatusLabel) return;
+    const stored = globalThis.qpyodideStorage.load(this.uid);
+    const live = this.editor ? this.editor.getValue() : stored;
+    const original = this.code;
+    const meaningfullySaved = stored !== null && stored !== original && live !== original;
+    const savableNow = !meaningfullySaved && globalThis.qpyodideStorage.cellEnabled(this.options);
+    const visible = meaningfullySaved || savableNow;
+    this.storageStatusLabel.hidden = !visible;
+    this.storageStatusLabel.style.display = visible ? "" : "none";
+    this.storageStatusLabel.classList.toggle("qpyodide-storage-status-savable", savableNow);
+    this.storageStatusLabel.title = savableNow ? QP_L.storageSavableTitle : "";
+    this.storageStatusLabel.textContent = meaningfullySaved
+      ? (justRestored ? QP_L.storageRestoredStatus : QP_L.storageSavedStatus)
+      : (savableNow ? QP_L.storageSavableStatus : "");
+    if (this.clearSavedButton) this.clearSavedButton.hidden = !meaningfullySaved;
+    // Tracks whether the label is currently showing "Restored" specifically
+    // -- onFirstEditAfterRestore() below watches this to flip it to
+    // "Saved" the moment the restored text gets overwritten, since
+    // "Restored" would otherwise keep describing content that no longer
+    // matches what was actually restored.
+    this.showingRestored = meaningfullySaved && !!justRestored;
+  }
+
+  /** Called on every editor content change. The "Restored" status only
+   *  ever describes the code exactly as it was loaded from storage; once
+   *  the student changes so much as one character, it stops being
+   *  accurate and must switch to the generic "Saved" wording right away --
+   *  independent of whether an actual write has happened yet (autosave is
+   *  debounced, and manual-save mode may not write until much later). The
+   *  underlying saved copy is untouched either way; only the label. */
+  onFirstEditAfterRestore() {
+    if (!this.showingRestored) return;
+    this.updateStorageStatus(false);
+  }
+
+  /** Puts the editor's content back to the cell's original code and clears
+   *  run state -- everything the Reset button does EXCEPT touching
+   *  localStorage or asking for confirmation (callers decide both: the
+   *  Reset button confirms per-cell and clears its own storage entry; the
+   *  "delete all local saves" bulk action in the settings gear already
+   *  confirmed once and clears storage for every cell in one call, then
+   *  uses this to also put every currently open editor back in sync --
+   *  otherwise the (now storage-less) edited text would just get saved
+   *  right back on the next keystroke, silently undoing the deletion. */
+  resetEditorToOriginal() {
+    if (this.editor) {
+      this.editor.setValue(this.editor.__qpyodideinitialCode);
+      // setValue() above fires onDidChangeModelContent synchronously, which
+      // includes scheduleSave() -- left alone, that would debounce-save the
+      // (unchanged) original code right back ~500ms later, silently
+      // reviving the "Saved"/🗑 UI on a cell nothing actually changed in.
+      // Both callers (Reset button, "delete all local saves") already
+      // handle storage themselves right after this returns, so that
+      // scheduled write must never be allowed to fire.
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.lastRunCode = null;
+    this.lastOutput = null;
+    [this.outputCodeDiv, this.outputFeedbackDiv, this.outputGraphDiv].forEach((div) => {
+      if (div.classList.contains("has-content")) {
+        div.innerHTML = "";
+        div.classList.remove("has-content");
+      }
+    });
+  }
+
+  /** Re-derives everything that can change live without a page reload: the
+   *  manual Save button's visibility, and (via updateStorageStatus()) the
+   *  "Savable" indicator, from the reader's device-wide autosave toggle and
+   *  manual-save mode. Called once at construction and again by
+   *  qpyodideRefreshStorageUI() (wired to both settings-gear checkboxes in
+   *  qpyodide-feedback.js). Passes through the CURRENT showingRestored
+   *  rather than recomputing it, so merely flipping a setting can never by
+   *  itself turn a "Restored" label into "Saved" -- only actually editing
+   *  the cell does that (see onFirstEditAfterRestore()). */
+  refreshStorageUI() {
+    if (!this.storageCapable) return;
+    if (this.saveButton) {
+      const manual = globalThis.qpyodideStorage.isManualMode();
+      const persistable = globalThis.qpyodideStorage.cellEnabled(this.options);
+      this.saveButton.hidden = !(manual && persistable);
+    }
+    this.updateStorageStatus(this.showingRestored);
+  }
+
+  /** Debounced autosave: schedules a save a moment after the last
+   *  keystroke instead of on every single content change. Re-checks live
+   *  state right before actually writing (not just when scheduled), and
+   *  never fires at all in manual-save mode -- there, only the Save button
+   *  (see wireButtons()) writes. */
+  scheduleSave() {
+    if (!this.storageCapable) return;
+    if (globalThis.qpyodideStorage.isManualMode()) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      if (!globalThis.qpyodideStorage.cellEnabled(this.options)) return;
+      globalThis.qpyodideStorage.save(this.uid, this.getCode());
+      this.updateStorageStatus(false);
+    }, 500);
   }
 
   /** Creates the Monaco editor (height, EOL, keyboard shortcuts). */
@@ -382,7 +596,10 @@ class EditorUnit {
 
     require(["vs/editor/editor.main"], function () {
       thiz.editor = monaco.editor.create(thiz.editorDiv, {
-        value: thiz.code,
+        // Restored, saved code (if any) takes the editor's initial value --
+        // the original course code stays available via __qpyodideinitialCode
+        // below for the Reset button. Never auto-run either way.
+        value: thiz.savedCode != null ? thiz.savedCode : thiz.code,
         language: "python",
         theme: qpyodideMonacoTheme(),
         automaticLayout: true,           // Works wonderfully with RevealJS
@@ -456,6 +673,10 @@ class EditorUnit {
       thiz.editor.onDidContentSizeChange(updateHeight);
       // Code changes can add/remove input() -> re-evaluate the gate
       thiz.editor.onDidChangeModelContent(() => thiz.updateInputGate());
+      // Autosave to localStorage (debounced), only for opted-in cells
+      thiz.editor.onDidChangeModelContent(() => thiz.scheduleSave());
+      // "Restored" must stop describing the content the instant it's edited
+      thiz.editor.onDidChangeModelContent(() => thiz.onFirstEditAfterRestore());
       updateHeight();
       thiz.updateInputGate();
     });
@@ -473,17 +694,39 @@ class EditorUnit {
 
     this.resetButton.onclick = () => {
       if (thiz.editor) {
-        thiz.editor.setValue(thiz.editor.__qpyodideinitialCode);
-      }
-      thiz.lastRunCode = null;
-      thiz.lastOutput = null;
-      [thiz.outputCodeDiv, thiz.outputFeedbackDiv, thiz.outputGraphDiv].forEach((div) => {
-        if (div.classList.contains("has-content")) {
-          div.innerHTML = "";
-          div.classList.remove("has-content");
+        // Only nag with a confirmation when Reset would actually discard
+        // something -- code already matching the original is a no-op.
+        if (thiz.getCode() !== thiz.editor.__qpyodideinitialCode &&
+            !window.confirm(QP_L.resetConfirm)) {
+          return;
         }
-      });
+      }
+      thiz.resetEditorToOriginal();
+      if (thiz.storageCapable) {
+        globalThis.qpyodideStorage.clear(thiz.uid);
+        thiz.updateStorageStatus(false);
+      }
     };
+
+    // Manual-save mode only: writes immediately, bypassing the debounce
+    // (and bypassing manual-mode's own "autosave never fires" rule in
+    // scheduleSave() -- this button IS the save action in that mode).
+    if (this.saveButton) {
+      this.saveButton.onclick = () => {
+        globalThis.qpyodideStorage.save(thiz.uid, thiz.getCode());
+        thiz.updateStorageStatus(false);
+      };
+    }
+
+    // "Clear saved code": drops the localStorage backup without touching
+    // whatever is currently in the editor (e.g. before leaving a shared
+    // computer, without losing the in-progress edit view).
+    if (this.clearSavedButton) {
+      this.clearSavedButton.onclick = () => {
+        globalThis.qpyodideStorage.clear(thiz.uid);
+        thiz.updateStorageStatus(false);
+      };
+    }
 
     // AI feedback: all of its logic lives in qpyodide-feedback.js
     if (this.feedbackButton) {
@@ -870,21 +1113,48 @@ class InteractiveCell extends BaseCell {
       .appendChild(addCodeBlockButton);
 
     const thiz = this;
-    addCodeBlockButton.onclick = function () {
+    // At most one extra block ever exists per cell (the button disables
+    // itself below after first use), so its identity can be a fixed
+    // "extra:<parent identity>" -- no occurrence counter needed, unlike
+    // computeIdentities()'s handling of duplicate original code. Registered
+    // up front (before the block itself exists) so it's available both to
+    // the click handler below and to the auto-restore check right after.
+    const storage = globalThis.qpyodideStorage;
+    const extraUid = `${this.id}.2`;
+    const parentIdentity = storage?.identityFor(this.primaryUnit.uid);
+    if (parentIdentity) {
+      storage.registerIdentity(extraUid, "extra:" + parentIdentity);
+    }
+
+    function addExtraCodeBlock() {
       const extraHost = document.createElement("div");
       extraHost.className = "qpyodide-extra-codeblock";
       details.appendChild(extraHost);
 
       const extraOptions = { ...thiz.options, "read-only": "false", "autorun": "" };
       thiz.units.push(new EditorUnit({
-        uid: `${thiz.id}.${thiz.units.length + 1}`,
-        code: "",
+        uid: extraUid,
+        code: "",   // the extra block's "original" is always empty
         options: extraOptions,
         hostDiv: extraHost
       }));
 
       addCodeBlockButton.disabled = true;
-    };
+    }
+
+    addCodeBlockButton.onclick = addExtraCodeBlock;
+
+    // A previous visit may have saved code into this cell's extra block --
+    // recreate it right away with that code showing, same "restored, never
+    // auto-run" rule as every other cell (EditorUnit's own constructor
+    // does the actual restore, via the identity registered above). Guarded
+    // by the same condition EditorUnit itself uses for storageCapable, so
+    // a cell later opted out via `#| local-storage: false` never grows a
+    // phantom empty block just because an old save still exists for it.
+    if (parentIdentity && this.options["local-storage"] !== "false" &&
+        storage.hasSaved(extraUid)) {
+      addExtraCodeBlock();
+    }
 
     mainDiv.appendChild(details);
     this.insertionLocation.appendChild(mainDiv);

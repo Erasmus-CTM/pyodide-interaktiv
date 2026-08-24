@@ -24,6 +24,12 @@ globalThis.qpyodideLocales = {
     labelReadOnly:       "Read-only",
     labelEditable:       "Editable",
     resetTitle:          "Reset",
+    clearSavedTitle:     "Clear saved code for this cell",
+    storageSavedStatus:  "💾 Saved",
+    storageRestoredStatus: "💾 Restored",
+    storageSavableStatus: "💾 Savable",
+    storageSavableTitle: "This cell's code will be saved to this browser as you type",
+    resetConfirm:        "This discards your current code and restores the original version. Continue?",
     copyTitle:           "Copy code",
     feedbackTitle:       "AI feedback on the current code",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
@@ -72,6 +78,20 @@ globalThis.qpyodideLocales = {
     loadingPython:       "🟡 Python (Pyodide) is loading …",
     engineReady:         "🟢 Ready!",
     engineFailed:        function (msg) { return "🔴 Python could not be loaded: " + msg; },
+    storageToggleLabel:  "Save code in this browser",
+    storageToggleTitle:  "When off, your code is never saved to this browser. Already-saved code stays until you clear it per cell or delete all saves below.",
+    storageModeAutoLabel: "Automatically save while typing",
+    storageModeAutoTitle: "Every change is saved automatically a moment after you stop typing.",
+    storageModeManualLabel: "Only save cells where I click Save",
+    storageModeManualTitle: "Nothing is saved automatically; each cell gets its own Save button instead.",
+    saveCellTitle:       "Save the code changes in this cell locally",
+    deleteAllSavesLabel: "Delete all local saves",
+    deleteAllSavesTitle: "Delete all code saved locally in this browser, on every page",
+    deleteAllSavesConfirm:
+      "This permanently deletes all code saved locally in this browser, " +
+      "across every page, and resets every cell on this page back to its " +
+      "original code. This cannot be undone. Continue?",
+    settingsTitleStorageOnly: "Local autosave settings",
     // Worker messages: run in the Web Worker, passed there via the init
     // config (the worker doesn't see QP_L).
     workerLoading:       "Python (Pyodide) is loading in the background …",
@@ -261,6 +281,12 @@ globalThis.qpyodideLocales = {
     labelReadOnly:       "Schreibgeschützt",
     labelEditable:       "Editierbar",
     resetTitle:          "Zurücksetzen",
+    clearSavedTitle:     "Gespeicherten Code für diese Zelle löschen",
+    storageSavedStatus:  "💾 Gespeichert",
+    storageRestoredStatus: "💾 Wiederhergestellt",
+    storageSavableStatus: "💾 Speicherbar",
+    storageSavableTitle: "Der Code dieser Zelle wird beim Tippen in diesem Browser gespeichert",
+    resetConfirm:        "Dadurch geht dein aktueller Code verloren und die Originalversion wird wiederhergestellt. Fortfahren?",
     copyTitle:           "Code kopieren",
     feedbackTitle:       "KI-Feedback zum aktuellen Code",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
@@ -309,6 +335,20 @@ globalThis.qpyodideLocales = {
     loadingPython:       "🟡 Python (Pyodide) wird geladen …",
     engineReady:         "🟢 Bereit!",
     engineFailed:        function (msg) { return "🔴 Python konnte nicht geladen werden: " + msg; },
+    storageToggleLabel:  "Code in diesem Browser speichern",
+    storageToggleTitle:  "Wenn deaktiviert, wird dein Code nicht mehr in diesem Browser gespeichert. Bereits gespeicherter Code bleibt bestehen, bis du ihn pro Zelle oder über „Alle lokalen Speicherungen löschen“ unten entfernst.",
+    storageModeAutoLabel: "Automatisch beim Tippen speichern",
+    storageModeAutoTitle: "Jede Änderung wird kurz nachdem du aufhörst zu tippen automatisch gespeichert.",
+    storageModeManualLabel: "Nur speichern, wenn ich auf Speichern klicke",
+    storageModeManualTitle: "Es wird nichts automatisch gespeichert; stattdessen erhält jede Zelle einen eigenen Speichern-Button.",
+    saveCellTitle:       "Code-Änderungen dieser Zelle lokal speichern",
+    deleteAllSavesLabel: "Alle lokalen Speicherungen löschen",
+    deleteAllSavesTitle: "Löscht allen lokal in diesem Browser gespeicherten Code, auf allen Seiten",
+    deleteAllSavesConfirm:
+      "Dadurch wird der gesamte lokal in diesem Browser gespeicherte Code auf " +
+      "allen Seiten dauerhaft gelöscht, und jede Zelle auf dieser Seite wird auf " +
+      "ihren ursprünglichen Code zurückgesetzt. Das kann nicht rückgängig gemacht werden. Fortfahren?",
+    settingsTitleStorageOnly: "Einstellungen für lokales Speichern",
     // Worker messages: run in the Web Worker, passed there via the init
     // config (the worker doesn't see QP_L).
     workerLoading:       "Python (Pyodide) wird im Hintergrund geladen …",
@@ -499,6 +539,12 @@ globalThis.qpyodideLocales = {
     labelReadOnly:       "Skrivskyddad",
     labelEditable:       "Redigerbar",
     resetTitle:          "Återställ",
+    clearSavedTitle:     "Ta bort sparad kod för den här cellen",
+    storageSavedStatus:  "💾 Sparad",
+    storageRestoredStatus: "💾 Återställd",
+    storageSavableStatus: "💾 Kan sparas",
+    storageSavableTitle: "Koden i den här cellen sparas i den här webbläsaren medan du skriver",
+    resetConfirm:        "Detta tar bort din nuvarande kod och återställer originalversionen. Fortsätta?",
     copyTitle:           "Kopiera koden",
     feedbackTitle:       "AI-feedback på den aktuella koden",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
@@ -547,6 +593,20 @@ globalThis.qpyodideLocales = {
     loadingPython:       "🟡 Python (Pyodide) laddas …",
     engineReady:         "🟢 Klart!",
     engineFailed:        function (msg) { return "🔴 Python kunde inte laddas: " + msg; },
+    storageToggleLabel:  "Spara kod i den här webbläsaren",
+    storageToggleTitle:  "Om avstängd sparas din kod inte längre i den här webbläsaren. Redan sparad kod finns kvar tills du rensar den per cell eller via ”Ta bort alla lokala sparningar” nedan.",
+    storageModeAutoLabel: "Spara automatiskt medan jag skriver",
+    storageModeAutoTitle: "Varje ändring sparas automatiskt strax efter att du slutar skriva.",
+    storageModeManualLabel: "Spara bara när jag klickar på Spara",
+    storageModeManualTitle: "Inget sparas automatiskt; varje cell får istället en egen Spara-knapp.",
+    saveCellTitle:       "Spara kodändringarna i den här cellen lokalt",
+    deleteAllSavesLabel: "Ta bort alla lokala sparningar",
+    deleteAllSavesTitle: "Tar bort all lokalt sparad kod i den här webbläsaren, på alla sidor",
+    deleteAllSavesConfirm:
+      "Detta tar permanent bort all kod som sparats lokalt i den här webbläsaren, " +
+      "på alla sidor, och återställer varje cell på den här sidan till sin " +
+      "ursprungliga kod. Det går inte att ångra. Fortsätta?",
+    settingsTitleStorageOnly: "Inställningar för lokal sparning",
     // Worker messages: run in the Web Worker, passed there via the init
     // config (the worker doesn't see QP_L).
     workerLoading:       "Python (Pyodide) laddas i bakgrunden …",
@@ -737,6 +797,12 @@ globalThis.qpyodideLocales = {
     labelReadOnly:       "Skrivebeskyttet",
     labelEditable:       "Redigerbar",
     resetTitle:          "Tilbakestill",
+    clearSavedTitle:     "Slett lagret kode for denne cellen",
+    storageSavedStatus:  "💾 Lagret",
+    storageRestoredStatus: "💾 Gjenopprettet",
+    storageSavableStatus: "💾 Kan lagres",
+    storageSavableTitle: "Koden i denne cellen lagres i denne nettleseren mens du skriver",
+    resetConfirm:        "Dette fjerner koden din og gjenoppretter originalversjonen. Fortsette?",
     copyTitle:           "Kopier koden",
     feedbackTitle:       "KI-tilbakemelding på den gjeldende koden",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Tilbakemelding',
@@ -785,6 +851,20 @@ globalThis.qpyodideLocales = {
     loadingPython:       "🟡 Python (Pyodide) lastes …",
     engineReady:         "🟢 Klar!",
     engineFailed:        function (msg) { return "🔴 Python kunne ikke lastes: " + msg; },
+    storageToggleLabel:  "Lagre kode i denne nettleseren",
+    storageToggleTitle:  "Når av lagres ikke koden din lenger i denne nettleseren. Allerede lagret kode blir liggende til du sletter den per celle eller via «Slett alle lokale lagringer» nedenfor.",
+    storageModeAutoLabel: "Lagre automatisk mens jeg skriver",
+    storageModeAutoTitle: "Hver endring lagres automatisk et lite øyeblikk etter at du slutter å skrive.",
+    storageModeManualLabel: "Lagre bare når jeg klikker Lagre",
+    storageModeManualTitle: "Ingenting lagres automatisk; hver celle får i stedet sin egen Lagre-knapp.",
+    saveCellTitle:       "Lagre kodeendringene i denne cellen lokalt",
+    deleteAllSavesLabel: "Slett alle lokale lagringer",
+    deleteAllSavesTitle: "Sletter all lokalt lagret kode i denne nettleseren, på alle sider",
+    deleteAllSavesConfirm:
+      "Dette sletter permanent all kode som er lagret lokalt i denne nettleseren, " +
+      "på alle sider, og tilbakestiller hver celle på denne siden til den " +
+      "opprinnelige koden. Dette kan ikke angres. Fortsette?",
+    settingsTitleStorageOnly: "Innstillinger for lokal lagring",
     // Worker messages: run in the Web Worker, passed there via the init
     // config (the worker doesn't see QP_L).
     workerLoading:       "Python (Pyodide) lastes i bakgrunnen …",
@@ -975,6 +1055,12 @@ globalThis.qpyodideLocales = {
     labelReadOnly:       "Skrivebeskyttet",
     labelEditable:       "Redigerbar",
     resetTitle:          "Nulstil",
+    clearSavedTitle:     "Ryd gemt kode for denne celle",
+    storageSavedStatus:  "💾 Gemt",
+    storageRestoredStatus: "💾 Gendannet",
+    storageSavableStatus: "💾 Kan gemmes",
+    storageSavableTitle: "Koden i denne celle gemmes i denne browser, mens du skriver",
+    resetConfirm:        "Dette fjerner din nuværende kode og gendanner originalversionen. Fortsæt?",
     copyTitle:           "Kopiér koden",
     feedbackTitle:       "AI-feedback på den aktuelle kode",
     feedbackLabel:       '<i class="fa-regular fa-comment-dots"></i> Feedback',
@@ -1023,6 +1109,20 @@ globalThis.qpyodideLocales = {
     loadingPython:       "🟡 Python (Pyodide) indlæses …",
     engineReady:         "🟢 Klar!",
     engineFailed:        function (msg) { return "🔴 Python kunne ikke indlæses: " + msg; },
+    storageToggleLabel:  "Gem kode i denne browser",
+    storageToggleTitle:  "Når slået fra, gemmes din kode ikke længere i denne browser. Allerede gemt kode forbliver, indtil du rydder den pr. celle eller via „Slet alle lokale gemte“ nedenfor.",
+    storageModeAutoLabel: "Gem automatisk, mens jeg skriver",
+    storageModeAutoTitle: "Hver ændring gemmes automatisk et øjeblik efter, du holder op med at skrive.",
+    storageModeManualLabel: "Gem kun, når jeg klikker Gem",
+    storageModeManualTitle: "Intet gemmes automatisk; hver celle får i stedet sin egen Gem-knap.",
+    saveCellTitle:       "Gem kodeændringerne i denne celle lokalt",
+    deleteAllSavesLabel: "Slet alle lokale gemte",
+    deleteAllSavesTitle: "Sletter al lokalt gemt kode i denne browser, på alle sider",
+    deleteAllSavesConfirm:
+      "Dette sletter permanent al kode, der er gemt lokalt i denne browser, " +
+      "på alle sider, og nulstiller hver celle på denne side til dens " +
+      "oprindelige kode. Dette kan ikke fortrydes. Fortsæt?",
+    settingsTitleStorageOnly: "Indstillinger for lokal lagring",
     // Worker messages: run in the Web Worker, passed there via the init
     // config (the worker doesn't see QP_L).
     workerLoading:       "Python (Pyodide) indlæses i baggrunden …",

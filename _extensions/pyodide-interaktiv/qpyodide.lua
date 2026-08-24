@@ -109,6 +109,31 @@ local feedbackHints = "true"
 local pdfFallback = "false"
 
 ----
+--- Setup variables for local-storage autosave of editable cell code
+
+-- Whether editable cells autosave their code to the browser's localStorage
+-- and restore it (never auto-run) on later visits. Off by default -- opt in
+-- via `pyodide: local-storage: true` document-wide, or `#| local-storage:
+-- true/false` per cell (overrides the document default).
+local localStorageEnabled = "false"
+
+-- Optional "epoch" value baked into every saved-code storage key on this
+-- page (see resolveLocalStorageEpoch() below and qpyodide-storage.js).
+-- Lets a course re-render its way to a clean slate -- e.g. between two
+-- groups sitting the same exam on shared lab PCs -- without relying on
+-- every student remembering to clear their own saved code first. Off by
+-- default (raw string, resolved by resolveLocalStorageEpoch()):
+--   unset/false   -- unchanged behavior: saved code survives re-renders
+--   true          -- a fresh value every render (even with zero content
+--                    changes), so re-rendering alone retires every
+--                    previously saved answer on this page
+--   any other text -- used verbatim; the instructor bumps it by hand right
+--                    before each new sitting/session, so an unrelated
+--                    re-render/redeploy (e.g. a CI rebuild mid-exam)
+--                    doesn't also wipe still-wanted student progress
+local localStorageEpoch = "false"
+
+----
 --- Setup variables for real, executed output in any format (`*-autoexec`)
 
 -- Recognized `<format>-autoexec` targets, in priority order. A render only
@@ -151,6 +176,7 @@ local qPyodideDefaultCellOptions = {
   ["comment"] = "",
   ["code-fold"] = "",
   ["pdf-fallback"] = "",
+  ["local-storage"] = "",
   ["label"] = "",
   ["autorun"] = "",
   ["classes"] = "",
@@ -183,6 +209,38 @@ local function isTruthy(value)
   end
   local normalized = tostring(value):lower()
   return normalized == "true" or normalized == "1"
+end
+
+-- Resolves the raw `pyodide: local-storage-epoch:` value (see its own
+-- comment above, near `local localStorageEpoch`) into the actual string
+-- baked into every saved-code storage key:
+--   unset/false -> "" (off: unchanged behavior, no epoch component at all)
+--   true        -> a value that's different on every render, even a
+--                  content-identical one (os.time() alone isn't enough --
+--                  two renders within the same second would collide -- so a
+--                  random suffix is appended too)
+--   other text  -> that text verbatim (manual, instructor-controlled)
+local function resolveLocalStorageEpoch(rawValue)
+  if isVariableEmpty(rawValue) then
+    return ""
+  end
+  local normalized = tostring(rawValue):lower()
+  if normalized == "false" or normalized == "0" then
+    return ""
+  end
+  if normalized == "true" or normalized == "1" then
+    return tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
+  end
+  return tostring(rawValue)
+end
+
+-- Escapes a Lua string for safe embedding inside a double-quoted JS string
+-- literal in the settings template. `local-storage-epoch` is free-text
+-- instructor-authored YAML (same trust level as e.g. `home-dir` elsewhere in
+-- this file, which isn't escaped at all) -- this is just cheap insurance
+-- against a stray `"` or backslash breaking the generated JS.
+local function jsStringEscape(s)
+  return (s:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"))
 end
 
 -- Copy the top level value and its direct children
@@ -329,6 +387,20 @@ local function setPyodideInitializationOptions(meta)
     pdfFallback = pandoc.utils.stringify(pyodide["pdf-fallback"])
   end
 
+  -- Document-wide default for local-storage autosave. Default: false
+  -- (unchanged legacy behavior, no autosave). Overridable per cell via
+  -- `#| local-storage: ...`.
+  if isVariablePopulated(pyodide['local-storage']) then
+    localStorageEnabled = pandoc.utils.stringify(pyodide["local-storage"])
+  end
+
+  -- Storage "epoch" -- see the variable's own comment above for the
+  -- true/false/free-text tri-state. Document-wide only: a whole-room reset
+  -- doesn't make sense as a per-cell override.
+  if isVariablePopulated(pyodide['local-storage-epoch']) then
+    localStorageEpoch = pandoc.utils.stringify(pyodide["local-storage-epoch"])
+  end
+
   -- Document-wide defaults for real, executed output. Every `<name>-
   -- autoexec` key under `pyodide:` is captured here, whether or not "name"
   -- is a format this particular render matches -- only the one matching
@@ -399,6 +471,8 @@ local function initializationPyodide()
     ["FEEDBACKENABLED"] = feedbackEnabled,
     ["FEEDBACKSTORAGE"] = feedbackStorage,
     ["FEEDBACKHINTS"] = feedbackHints,
+    ["LOCALSTORAGEENABLED"] = tostring(isTruthy(localStorageEnabled)),
+    ["LOCALSTORAGEEPOCH"] = jsStringEscape(resolveLocalStorageEpoch(localStorageEpoch)),
     ["LANG"] = lang
   }
 
@@ -517,6 +591,16 @@ local function ensurePyodideSetup()
   -- Insert the Pyodide initialization routine
   includeTextInHTMLTag("in-header", initializedConfigurationPyodide, "module")
 
+  -- Insert the local-storage autosave module (identity resolution + load/
+  -- save/clear, no UI of its own -- its "autosave code to this browser"
+  -- checkbox lives inside the settings gear built by qpyodide-feedback.js
+  -- below). Must come after qpyodide-document-settings.js just above (needs
+  -- globalThis.qpyodideLocalStorageOptions and globalThis.qpyodideCellDetails)
+  -- and before qpyodide-feedback.js (reads globalThis.qpyodideStorage.anyEnabled
+  -- to decide whether to build the gear at all) and qpyodide-cell-classes.js
+  -- (after-body; reads globalThis.qpyodideStorage for load/save/clear).
+  includeFileInHTMLTag("in-header", "qpyodide-storage.js", "module")
+
   -- Insert the UI translations. Must come directly after the settings module
   -- (which defines globalThis.qpyodideLang) and before every module that reads
   -- globalThis.QP_L at load time.
@@ -525,8 +609,11 @@ local function ensurePyodideSetup()
   -- Insert JS routine to add document status header
   includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
 
-  -- Insert the AI feedback module (settings UI + API client); it deactivates
-  -- itself when `pyodide: feedback: false` is set in the document metadata.
+  -- Insert the AI feedback module (settings UI + API client). Builds the
+  -- settings gear when AI feedback is enabled (`pyodide: feedback: true`,
+  -- the default) OR when the local-storage autosave toggle needs a home
+  -- (`globalThis.qpyodideStorage.anyEnabled`) -- either alone is enough to
+  -- show the gear; the panel then contains whichever section(s) apply.
   includeFileInHTMLTag("in-header", "qpyodide-feedback.js", "module")
 
   -- Insert JS routine to bring Pyodide online

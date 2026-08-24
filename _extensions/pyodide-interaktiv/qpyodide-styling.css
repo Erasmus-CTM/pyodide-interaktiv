@@ -50,6 +50,20 @@
   align-self: center;
 }
 
+.qpyodide-storage-status {
+  font-size: 0.85rem;
+  opacity: 0.75;
+  align-self: center;
+}
+
+/* "Savable" state: nothing saved yet, but this cell would persist if the
+ * reader typed right now -- deliberately fainter than Saved/Restored so it
+ * reads as a passive hint, not an active confirmation. */
+.qpyodide-storage-status.qpyodide-storage-status-savable {
+  opacity: 0.45;
+  font-style: italic;
+}
+
 /* Extra code block ("+ Code block") */
 .qpyodide-extra-codeblock {
   margin-top: 1rem;
@@ -90,7 +104,9 @@ fieldset:disabled .qpyodide-button {
 .qpyodide-button-reset,
 .qpyodide-button-copy,
 .qpyodide-button-feedback,
-.qpyodide-button-codeblock {
+.qpyodide-button-codeblock,
+.qpyodide-button-clear-saved,
+.qpyodide-button-save-cell {
   color: var(--bs-body-color, #555);
   opacity: 0.75;
 }
@@ -194,6 +210,40 @@ fieldset:disabled .qpyodide-button {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Local-storage autosave checkboxes (inside the settings gear panel)     */
+
+.qpyodide-storage-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+/* Autosave-mode radios nested under the master "save in this browser"
+ * checkbox -- indented to read as sub-options, dimmed (not hidden) while
+ * the master is off so the reader's last choice stays visible. */
+.qpyodide-storage-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-left: 1.4rem;
+}
+
+.qpyodide-storage-mode-group-disabled {
+  opacity: 0.55;
+}
+
+.qpyodide-storage-mode-group-disabled .qpyodide-storage-toggle-label {
+  cursor: default;
+}
+
+.qpyodide-storage-delete-all {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Settings panel (set up AI feedback)                                    */
 
 #qpyodide-status-message-area {
@@ -219,6 +269,19 @@ fieldset:disabled .qpyodide-button {
   background-color: var(--bs-tertiary-bg, #f8f9fa);
   border: 1px solid var(--bs-border-color, #dee2e6);
   border-radius: 0.5rem;
+}
+
+.qpyodide-storage-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.qpyodide-feedback-panel hr {
+  margin: 0.75rem 0;
+  border-color: var(--bs-border-color, #dee2e6);
+  opacity: 1;
 }
 
 .qpyodide-feedback-field {
@@ -383,6 +446,10 @@ body.quarto-dark .qpyodide-readonly-label {
   font-weight: 600;
 }
 
+body.quarto-dark .qpyodide-storage-status {
+  color: var(--bs-emphasis-color, #ffffff);
+}
+
 body.quarto-dark .qpyodide-toolbar-readonly {
   background-color: var(--bs-secondary-bg, #343a40);
   color: var(--bs-body-color, #dee2e6);
@@ -403,7 +470,9 @@ body.quarto-dark .qpyodide-button:hover {
 body.quarto-dark .qpyodide-button-reset,
 body.quarto-dark .qpyodide-button-copy,
 body.quarto-dark .qpyodide-button-feedback,
-body.quarto-dark .qpyodide-button-codeblock {
+body.quarto-dark .qpyodide-button-codeblock,
+body.quarto-dark .qpyodide-button-clear-saved,
+body.quarto-dark .qpyodide-button-save-cell {
   color: var(--bs-body-color, #dee2e6);
   opacity: 0.75;
 }
@@ -512,6 +581,9 @@ body.quarto-dark .qpyodide-feedback-help {
     color: var(--bs-emphasis-color, #ffffff);
     font-weight: 600;
   }
+  body:not(.quarto-light) .qpyodide-storage-status {
+    color: var(--bs-emphasis-color, #ffffff);
+  }
   body:not(.quarto-light) .qpyodide-toolbar-readonly {
     background-color: var(--bs-secondary-bg, #343a40);
     color: var(--bs-body-color, #dee2e6);
@@ -529,7 +601,9 @@ body.quarto-dark .qpyodide-feedback-help {
   body:not(.quarto-light) .qpyodide-button-reset,
   body:not(.quarto-light) .qpyodide-button-copy,
   body:not(.quarto-light) .qpyodide-button-feedback,
-  body:not(.quarto-light) .qpyodide-button-codeblock {
+  body:not(.quarto-light) .qpyodide-button-codeblock,
+  body:not(.quarto-light) .qpyodide-button-clear-saved,
+  body:not(.quarto-light) .qpyodide-button-save-cell {
     color: var(--bs-body-color, #dee2e6);
     opacity: 0.75;
   }

@@ -128,7 +128,8 @@ Can be disabled via `feedback-hints: false`.
 | `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
 | `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset |
 | `<format>-autoexec` | — | `true`: for that one output format (e.g. `pdf-autoexec`, `html-autoexec`), actually *run* the cell via a local `python3`/`python` and show its real output instead of the interactive editor/`pdf-fallback`. Falls back to the document's `pyodide: <format>-autoexec:` when unset |
-| `label` | — | unique ID of the cell (`data-id` attribute) |
+| `local-storage` | — | `true`/`false`: autosave this cell's code to the browser's `localStorage` and restore it (never auto-run) on later visits. Falls back to the document's `pyodide: local-storage:` when unset |
+| `label` | — | unique ID of the cell (`data-id` attribute); also used as the stable key for `local-storage` autosave |
 | `classes` | — | additional CSS classes |
 | `fig-cap` | — | caption for plots |
 | `fig-width` / `fig-height` | `7` / `5` | plot size in inches |
@@ -149,6 +150,8 @@ pyodide:
   pdf-fallback: false            # PDF/docx: highlight {pyodide-python} as plain Python (default: false)
   pdf-autoexec: false            # PDF/docx: actually run {pyodide-python} cells and show real output (default: false)
   html-autoexec: false           # same, but for the HTML page itself (default: false)
+  local-storage: false           # autosave editable cells' code to the browser (default: false)
+  local-storage-epoch: false     # false: normal | true: reset on every render | text: reset when you change it
   lang: de                       # UI language (default: en)
 ```
 
@@ -169,6 +172,86 @@ reveal every remaining cell in one click ("Show all" / "No, thanks") —
 with only one other folded cell left, clicking it directly is no more
 effort, so the hint won't appear. Text is fully localized
 (see [UI language](#ui-language)).
+
+### Local-storage autosave (`local-storage`)
+
+Off by default. When enabled (`pyodide: local-storage: true`, or per cell
+via `#| local-storage: true`), an editable cell's code is autosaved to the
+browser's `localStorage` as the student types, and restored the next time
+they open that page — **the restored code is never run automatically**;
+students still have to press "Run code" themselves. Only the source code is
+persisted, never output or Python variables, so the Pyodide runtime is
+always recreated fresh on reload; a cell marked `context: setup` still runs
+invisibly at startup exactly as before.
+
+A cell shows a small "💾 Saved"/"💾 Restored" status next to its
+Editable label, plus a 🗑 button to drop just that cell's saved copy (e.g.
+before leaving a shared computer) without touching what's currently in the
+editor. A cell that could save but hasn't yet gets a faint "💾 Savable"
+marker instead, so it's clear at a glance which cells are actually live —
+distinct from cells that are read-only or opted out. Once the live editor
+content (or the saved copy itself) matches the cell's original code again —
+whether because the student edited it back by hand or a restore turned out
+to be a no-op — the label drops back to "Savable"/hidden on its own; it
+never keeps announcing "Saved"/"Restored" for content that's no longer
+actually different. The existing Reset button restores the cell's original
+course code *and* clears its saved copy in one step — it asks for
+confirmation first if that would discard code different from the original.
+A "+ Code block" editor added by a student persists exactly like a normal
+cell (save/restore/delete-all all apply to it too).
+
+Saved code is scoped to the current page path, so identical exercises on
+different pages (e.g. "Week 1" vs. "Week 2") never collide, and it never
+leaves the browser (no sync between devices; clearing browser/site data
+removes it, same as any other `localStorage` data).
+
+Cells are matched to their saved code by, in order: their explicit
+`#| label:` (most stable — survives the cell moving around the page), then
+a hash of the cell's original code (survives reordering, not edits to the
+original), disambiguated by occurrence number if identical code appears in
+more than one cell. Cells without a stable label are therefore best given
+one if their original code is likely to change later.
+
+Students get their own device-wide controls, independent of the
+document/cell settings above, folded into the existing gear-icon settings
+panel (shown whenever AI feedback or local-storage could apply, even if the
+other one is off): a "Save code in this browser" master checkbox, and
+underneath it a choice between "Automatically save while typing" (default)
+and "Only save cells where I click Save" (each capable cell gets an
+explicit 💾 Save button instead of autosaving). Flipping either setting
+applies immediately, with no page reload, and never touches or hides
+code that's already saved — only whether *new* saving is currently allowed.
+The panel also has a "Delete all local saves" button that wipes every
+saved cell across every page on the site (with a confirmation first) and
+resets every currently open cell on the page back to its original code, so
+nothing gets silently autosaved right back afterward.
+
+#### Resetting between sessions on shared computers (`local-storage-epoch`)
+
+On lab/exam-room PCs where several people use the same browser profile in a
+row, relying on every student remembering to clear their own code isn't
+reliable. `pyodide: local-storage-epoch:` gives the instructor a way to
+force a clean slate independent of that:
+
+```yaml
+pyodide:
+  local-storage-epoch: false                 # default: off, saved code survives re-renders
+  local-storage-epoch: true                  # a fresh value every render -- re-rendering alone
+                                              # retires every previously saved answer on this page
+  local-storage-epoch: "exam-2026-08-24-am"  # any other text: used verbatim, stable across
+                                              # re-renders/redeploys until you change it by hand
+```
+
+The epoch is folded into every saved-code storage key. When it changes,
+code saved under the old key simply can't be found anymore — functionally
+identical to it having been cleared, without needing to hunt down and
+delete each old entry (they become permanently unreachable, inert bytes in
+that browser's storage until it evicts them or the profile's site data is
+cleared). `true` is the "just re-render before the next group sits down"
+option; a manual string is for setups where the site gets redeployed for
+unrelated reasons during the exam window and an automatic per-render reset
+would be too aggressive — bump the string by hand only when you actually
+want a reset.
 
 ---
 

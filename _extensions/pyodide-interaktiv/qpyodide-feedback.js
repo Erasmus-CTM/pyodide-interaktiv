@@ -315,20 +315,136 @@ const QF_PROVIDER_PRESETS = {
   ollama:     { label: QP_L.presetOllama,     baseUrl: "http://localhost:11434/v1",    model: "" }
 };
 
+// Builds the "Local autosave" section of the settings panel: one master
+// checkbox ("save code in this browser at all"), a nested pair of radio
+// options that only matters while the master is on (autosave everything
+// while typing vs. only save cells the reader explicitly clicks Save on),
+// and a "delete all local saves" cleanup button. Independent of AI feedback
+// entirely -- called from qfBuildSettingsUI() whenever
+// globalThis.qpyodideStorage.anyEnabled, regardless of qfOptions.enabled.
+function qfBuildStorageSection() {
+  const section = document.createElement("div");
+  section.className = "qpyodide-storage-settings-section";
+
+  const enableLabel = document.createElement("label");
+  enableLabel.className = "qpyodide-storage-toggle-label";
+  enableLabel.title = QP_L.storageToggleTitle;
+  const enableCheckbox = document.createElement("input");
+  enableCheckbox.type = "checkbox";
+  enableCheckbox.checked = !globalThis.qpyodideStorage.isUserDisabled();
+  enableLabel.appendChild(enableCheckbox);
+  enableLabel.appendChild(document.createTextNode(QP_L.storageToggleLabel));
+  section.appendChild(enableLabel);
+
+  // Nested under the master checkbox: which cells actually get saved while
+  // it's on. Disabled (not hidden) while the master is off, so the reader's
+  // last choice stays visible instead of disappearing.
+  const modeGroup = document.createElement("div");
+  modeGroup.className = "qpyodide-storage-mode-group";
+
+  const autoLabel = document.createElement("label");
+  autoLabel.className = "qpyodide-storage-toggle-label";
+  autoLabel.title = QP_L.storageModeAutoTitle;
+  const autoRadio = document.createElement("input");
+  autoRadio.type = "radio";
+  autoRadio.name = "qpyodide-storage-mode";
+  autoRadio.checked = !globalThis.qpyodideStorage.isManualMode();
+  autoLabel.appendChild(autoRadio);
+  autoLabel.appendChild(document.createTextNode(QP_L.storageModeAutoLabel));
+  modeGroup.appendChild(autoLabel);
+
+  const manualLabel = document.createElement("label");
+  manualLabel.className = "qpyodide-storage-toggle-label";
+  manualLabel.title = QP_L.storageModeManualTitle;
+  const manualRadio = document.createElement("input");
+  manualRadio.type = "radio";
+  manualRadio.name = "qpyodide-storage-mode";
+  manualRadio.checked = globalThis.qpyodideStorage.isManualMode();
+  manualLabel.appendChild(manualRadio);
+  manualLabel.appendChild(document.createTextNode(QP_L.storageModeManualLabel));
+  modeGroup.appendChild(manualLabel);
+
+  section.appendChild(modeGroup);
+
+  function applyEnabledState() {
+    const enabled = enableCheckbox.checked;
+    autoRadio.disabled = !enabled;
+    manualRadio.disabled = !enabled;
+    modeGroup.classList.toggle("qpyodide-storage-mode-group-disabled", !enabled);
+  }
+  applyEnabledState();
+
+  enableCheckbox.addEventListener("change", () => {
+    globalThis.qpyodideStorage.setUserDisabled(!enableCheckbox.checked);
+    applyEnabledState();
+    globalThis.qpyodideRefreshStorageUI?.();
+  });
+  autoRadio.addEventListener("change", () => {
+    if (!autoRadio.checked) return;
+    globalThis.qpyodideStorage.setManualMode(false);
+    globalThis.qpyodideRefreshStorageUI?.();
+  });
+  manualRadio.addEventListener("change", () => {
+    if (!manualRadio.checked) return;
+    globalThis.qpyodideStorage.setManualMode(true);
+    globalThis.qpyodideRefreshStorageUI?.();
+  });
+
+  const deleteAllBtn = document.createElement("button");
+  deleteAllBtn.type = "button";
+  deleteAllBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-storage-delete-all";
+  deleteAllBtn.title = QP_L.deleteAllSavesTitle;
+  deleteAllBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i> ' + QP_L.deleteAllSavesLabel;
+  deleteAllBtn.onclick = () => {
+    if (!window.confirm(QP_L.deleteAllSavesConfirm)) return;
+    globalThis.qpyodideStorage.clearAll();
+    // Also puts every currently open cell's editor back to its original
+    // code -- otherwise the edited-but-now-unsaved text would just get
+    // saved right back on the next keystroke. See qpyodide-cell-classes.js.
+    globalThis.qpyodideResetAllStorageUnits?.();
+  };
+  section.appendChild(deleteAllBtn);
+
+  return section;
+}
+
 function qfBuildSettingsUI() {
   const cfg = qfLoadConfig();
+  const storageActive = !!globalThis.qpyodideStorage?.anyEnabled;
 
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
   toggleBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-feedback-toggle";
   toggleBtn.innerHTML = '<i class="fa-solid fa-gear"></i>';
-  toggleBtn.title = QP_L.gearTitle;
+  // "Set up AI feedback" only makes sense as a title when that's actually
+  // in this panel; when AI feedback is off and only local-storage settings
+  // are here, say so instead.
+  toggleBtn.title = qfOptions.enabled ? QP_L.gearTitle : QP_L.settingsTitleStorageOnly;
 
   const statusSpan = document.createElement("span");
   statusSpan.className = "qpyodide-feedback-settings-status";
 
   const panel = document.createElement("div");
   panel.className = "qpyodide-feedback-panel";
+
+  // Local-storage autosave section, independent of AI feedback below --
+  // shown whenever the feature could apply to some cell on this page.
+  if (storageActive) {
+    panel.appendChild(qfBuildStorageSection());
+    if (qfOptions.enabled) {
+      panel.appendChild(document.createElement("hr"));
+    }
+  }
+
+  // Everything below is AI-feedback-specific -- skipped entirely when
+  // `pyodide: feedback: false`, in which case the panel built above (gear +
+  // storage section only) is already complete.
+  let saveBtn = null;
+  let infoBtn = null;
+  let helpDiv = null;
+  if (!qfOptions.enabled) {
+    return qfFinishSettingsUI({ toggleBtn, statusSpan, panel, saveBtn, infoBtn, helpDiv });
+  }
 
   // Provider preset (fills in base URL + example model)
   const presetSelect = document.createElement("select");
@@ -513,12 +629,12 @@ function qfBuildSettingsUI() {
   const actionRow = document.createElement("div");
   actionRow.className = "qpyodide-feedback-actions";
 
-  const saveBtn = document.createElement("button");
+  saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.className = "btn btn-default qpyodide-button";
   saveBtn.textContent = QP_L.saveBtn;
 
-  const infoBtn = document.createElement("button");
+  infoBtn = document.createElement("button");
   infoBtn.type = "button";
   infoBtn.className = "btn btn-light btn-sm qpyodide-button";
   infoBtn.textContent = QP_L.infoBtn;
@@ -527,10 +643,33 @@ function qfBuildSettingsUI() {
   actionRow.appendChild(infoBtn);
   panel.appendChild(actionRow);
 
-  const helpDiv = qfBuildHelpBox();
+  helpDiv = qfBuildHelpBox();
   panel.appendChild(helpDiv);
 
-  // Behavior
+  saveBtn.onclick = () => {
+    const newCfg = {
+      baseUrl: baseUrlInput.value.trim(),
+      apiKey: apiKeyInput.value.trim(),
+      model: modelInput.value.trim(),
+      mode: modeSelect.value,
+      storage: "local"
+    };
+    qfSaveConfig(newCfg);
+    statusSpan.textContent = QP_L.saveDone;
+    setTimeout(() => { statusSpan.textContent = ""; }, 3000);
+    // Auto-collapse after saving (qfFinishSettingsUI's setCollapsed)
+    qfUi.setCollapsed(true);
+  };
+
+  return qfFinishSettingsUI({ toggleBtn, statusSpan, panel, saveBtn, infoBtn, helpDiv });
+}
+
+// Shared tail end of qfBuildSettingsUI(): collapse/expand behavior, the
+// gear's click handler, and placing the toggle+panel into the status row.
+// Runs the same way whether the panel ended up storage-only (AI feedback
+// off) or has both sections -- `saveBtn`/`infoBtn`/`helpDiv` are null in
+// the storage-only case, so their handlers are skipped.
+function qfFinishSettingsUI({ toggleBtn, statusSpan, panel, saveBtn, infoBtn, helpDiv }) {
   function setCollapsed(collapsed) {
     panel.style.display = collapsed ? "none" : "block";
   }
@@ -546,24 +685,11 @@ function qfBuildSettingsUI() {
       setCollapsed(panel.style.display !== "none");
     }
   };
-  infoBtn.onclick = () => {
-    helpDiv.style.display = (helpDiv.style.display === "none") ? "block" : "none";
-  };
-
-  saveBtn.onclick = () => {
-    const newCfg = {
-      baseUrl: baseUrlInput.value.trim(),
-      apiKey: apiKeyInput.value.trim(),
-      model: modelInput.value.trim(),
-      mode: modeSelect.value,
-      storage: "local"
+  if (infoBtn) {
+    infoBtn.onclick = () => {
+      helpDiv.style.display = (helpDiv.style.display === "none") ? "block" : "none";
     };
-    qfSaveConfig(newCfg);
-    statusSpan.textContent = QP_L.saveDone;
-    setTimeout(() => { statusSpan.textContent = ""; }, 3000);
-    // Auto-collapse after saving
-    setCollapsed(true);
-  };
+  }
 
   // Always start collapsed – the panel only opens via the gear icon.
   setCollapsed(true);
@@ -686,7 +812,9 @@ globalThis.qpyodideFeedback = {
   openSettings: qfOpenSettingsNear
 };
 
-// Build the settings panel (modules are deferred, so the DOM is ready)
-if (qfOptions.enabled) {
+// Build the settings gear (modules are deferred, so the DOM is ready) --
+// either AI feedback or local-storage autosave being active is enough on
+// its own; the panel then contains whichever section(s) actually apply.
+if (qfOptions.enabled || globalThis.qpyodideStorage?.anyEnabled) {
   qfBuildSettingsUI();
 }
