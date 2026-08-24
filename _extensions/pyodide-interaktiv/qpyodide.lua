@@ -746,6 +746,37 @@ import ast, sys, traceback
 
 _ns = {}
 
+# Real Python has no display protocol of its own, so plt.show() by default
+# tries to pop up an interactive window using whatever GUI backend happens
+# to be installed -- disruptive during an unattended render, and the figure
+# would never end up in the rendered document anyway. Mirror what the
+# browser-side Pyodide worker does (see PY_SETUP in
+# qpyodide-document-engine-initialization.js): force the non-interactive
+# Agg backend and turn plt.show() into "save every open figure to a PNG,
+# print its path on a marker line, close it". The Lua side (see
+# extractAutoexecFigures()) pulls those marker lines back out of the
+# captured stdout and turns them into real embedded images. Wrapped in
+# try/except so cells that never touch matplotlib still work on an
+# interpreter that doesn't have it installed.
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as _qpyautoexec_plt
+
+    def _qpyautoexec_show(*args, **kwargs):
+        import os, tempfile
+        for num in _qpyautoexec_plt.get_fignums():
+            fig = _qpyautoexec_plt.figure(num)
+            fd, path = tempfile.mkstemp(suffix=".png", prefix="qpyautoexec_fig_")
+            os.close(fd)
+            fig.savefig(path, bbox_inches="tight")
+            _qpyautoexec_plt.close(fig)
+            print("<<<QPYAUTOEXEC_FIG:%s>>>" % path)
+
+    _qpyautoexec_plt.show = _qpyautoexec_show
+except Exception:
+    pass
+
 def _run(i, path, label):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -835,10 +866,29 @@ local function candidateSatisfiesImports(cmd, modules)
   return ok
 end
 
+-- Pull "<<<QPYAUTOEXEC_FIG:path>>>" marker lines (one per matplotlib figure
+-- captured by the plt.show() override in autoexecDriverPrelude) back out of
+-- one cell's raw captured stdout. Returns the remaining text with those
+-- marker lines removed, plus an ordered list of image paths.
+local function extractAutoexecFigures(text)
+  local images = {}
+  local keptLines = {}
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    local path = line:match("^<<<QPYAUTOEXEC_FIG:(.-)>>>$")
+    if path then
+      table.insert(images, path)
+    else
+      table.insert(keptLines, line)
+    end
+  end
+  return table.concat(keptLines, "\n"), images
+end
+
 -- Run every opted-in cell's cleaned source in ONE Python subprocess, in
 -- document order, sharing one namespace -- mirroring how the interactive
 -- Pyodide runtime in the browser keeps state across cells. Returns a list
--- of per-cell output strings, or nil if no interpreter could be found.
+-- of per-cell { text = <stdout text>, images = <list of PNG paths> }
+-- tables, or nil if no interpreter could be found.
 local function runAutoexecCellsForReal(cellSources)
   if #cellSources == 0 then
     return {}
@@ -928,13 +978,16 @@ local function runAutoexecCellsForReal(cellSources)
   for i = 1, #cellSources do
     local marker = "<<<QPYAUTOEXEC_END_" .. i .. ">>>\n"
     local startPos, endPos = rest:find(marker, 1, true)
+    local rawText
     if startPos then
-      outputs[i] = rest:sub(1, startPos - 1)
+      rawText = rest:sub(1, startPos - 1)
       rest = rest:sub(endPos + 1)
     else
-      outputs[i] = rest
+      rawText = rest
       rest = ""
     end
+    local text, images = extractAutoexecFigures(rawText)
+    outputs[i] = { text = text, images = images }
   end
 
   return outputs
@@ -990,10 +1043,14 @@ local function enablePyodideCodeCell(el)
     autoexecIndex = autoexecIndex + 1
 
     if autoexecResults ~= nil then
-      local outputText = (autoexecResults[autoexecIndex] or ""):gsub("%s+$", "")
+      local cellResult = autoexecResults[autoexecIndex] or { text = "", images = {} }
+      local outputText = (cellResult.text or ""):gsub("%s+$", "")
       local blocks = { pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {})) }
       if outputText ~= "" then
         table.insert(blocks, pandoc.CodeBlock(outputText, pandoc.Attr("", { "cell-output", "cell-output-stdout" }, {})))
+      end
+      for _, imagePath in ipairs(cellResult.images or {}) do
+        table.insert(blocks, pandoc.Para({ pandoc.Image({}, imagePath:gsub("\\", "/")) }))
       end
       return pandoc.Div(blocks, pandoc.Attr("", { "cell" }, {}))
     end
