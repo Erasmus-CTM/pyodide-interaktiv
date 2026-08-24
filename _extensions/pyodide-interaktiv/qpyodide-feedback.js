@@ -390,17 +390,31 @@ function qfBuildStorageSection() {
     globalThis.qpyodideRefreshStorageUI?.();
   });
 
+  // Two delete scopes, least-destructive first: this page only, then the
+  // whole project (every page on this site). Both reset every currently
+  // open cell's editor back to its original code afterward -- otherwise the
+  // edited-but-now-unsaved text would just get saved right back on the next
+  // keystroke. See qpyodide-cell-classes.js.
+  const deletePageBtn = document.createElement("button");
+  deletePageBtn.type = "button";
+  deletePageBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-storage-delete-btn";
+  deletePageBtn.title = QP_L.deleteThisPageSavesTitle;
+  deletePageBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i> ' + QP_L.deleteThisPageSavesLabel;
+  deletePageBtn.onclick = () => {
+    if (!window.confirm(QP_L.deleteThisPageSavesConfirm)) return;
+    globalThis.qpyodideStorage.clearPage();
+    globalThis.qpyodideResetAllStorageUnits?.();
+  };
+  section.appendChild(deletePageBtn);
+
   const deleteAllBtn = document.createElement("button");
   deleteAllBtn.type = "button";
-  deleteAllBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-storage-delete-all";
+  deleteAllBtn.className = "btn btn-light btn-sm qpyodide-button qpyodide-storage-delete-btn";
   deleteAllBtn.title = QP_L.deleteAllSavesTitle;
   deleteAllBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i> ' + QP_L.deleteAllSavesLabel;
   deleteAllBtn.onclick = () => {
     if (!window.confirm(QP_L.deleteAllSavesConfirm)) return;
     globalThis.qpyodideStorage.clearAll();
-    // Also puts every currently open cell's editor back to its original
-    // code -- otherwise the edited-but-now-unsaved text would just get
-    // saved right back on the next keystroke. See qpyodide-cell-classes.js.
     globalThis.qpyodideResetAllStorageUnits?.();
   };
   section.appendChild(deleteAllBtn);

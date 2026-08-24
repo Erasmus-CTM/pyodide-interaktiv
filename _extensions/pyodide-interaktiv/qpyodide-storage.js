@@ -227,6 +227,29 @@ globalThis.qpyodideStorage = (function () {
       const toRemove = keys.filter((key) => key.indexOf(STORAGE_PREFIX) === 0);
       toRemove.forEach(safeRemove);
       return toRemove.length;
+    },
+
+    // Wipes only the entries saved for the current page (any epoch), for a
+    // reader who wants a fresh start here without touching their saved code
+    // on other pages of the same project. Matches on ":" + pathname + ":"
+    // rather than parsing the key apart -- storageKey() deliberately keeps
+    // epoch and identity unparsed since either can itself contain colons
+    // (see storageKey() above), but a URL pathname does not, so it can
+    // still be found as an exact colon-delimited segment. Returns the
+    // number of entries removed.
+    clearPage() {
+      let keys;
+      try {
+        keys = Object.keys(window.localStorage);
+      } catch (e) {
+        return 0;
+      }
+      const marker = ":" + location.pathname + ":";
+      const toRemove = keys.filter((key) =>
+        key.indexOf(STORAGE_PREFIX) === 0 && key.indexOf(marker) !== -1
+      );
+      toRemove.forEach(safeRemove);
+      return toRemove.length;
     }
   };
 })();

@@ -221,10 +221,11 @@ and "Only save cells where I click Save" (each capable cell gets an
 explicit 💾 Save button instead of autosaving). Flipping either setting
 applies immediately, with no page reload, and never touches or hides
 code that's already saved — only whether *new* saving is currently allowed.
-The panel also has a "Delete all local saves" button that wipes every
-saved cell across every page on the site (with a confirmation first) and
-resets every currently open cell on the page back to its original code, so
-nothing gets silently autosaved right back afterward.
+The panel also has two delete buttons, both with a confirmation first and
+both resetting every currently open cell on the page back to its original
+code afterward, so nothing gets silently autosaved right back: "Delete
+saved code on this page" (only the current page) and "Delete all saved code
+in this project" (every page on the site).
 
 #### Resetting between sessions on shared computers (`local-storage-epoch`)
 

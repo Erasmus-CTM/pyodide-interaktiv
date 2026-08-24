@@ -73,13 +73,15 @@ const qpyodideStorageUnits = [];
 globalThis.qpyodideRefreshStorageUI = function () {
   qpyodideStorageUnits.forEach((unit) => unit.refreshStorageUI());
 };
-// Called by "delete all local saves" in the settings gear, right after
-// qpyodideStorage.clearAll(): puts every currently mounted, storage-capable
-// cell's editor back to its original code (otherwise an already-restored
-// or already-edited editor would keep showing the now-deleted content, and
-// the very next keystroke would just save it right back -- see
-// EditorUnit.resetEditorToOriginal()) and re-derives each cell's status
-// label/clear button from (now-empty) storage.
+// Called by both delete buttons in the settings gear (this page's saves via
+// qpyodideStorage.clearPage(), or the whole project's via .clearAll()):
+// puts every currently mounted, storage-capable cell's editor back to its
+// original code (otherwise an already-restored or already-edited editor
+// would keep showing the now-deleted content, and the very next keystroke
+// would just save it right back -- see EditorUnit.resetEditorToOriginal())
+// and re-derives each cell's status label/clear button from (now-empty)
+// storage. Both scopes always include every cell mounted on the current
+// page, so the same reset applies after either one.
 globalThis.qpyodideResetAllStorageUnits = function () {
   qpyodideStorageUnits.forEach((unit) => {
     unit.resetEditorToOriginal();
