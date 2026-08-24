@@ -127,6 +127,7 @@ Can be disabled via `feedback-hints: false`.
 | `autorun` | — | `true`: run the code automatically after Pyodide starts |
 | `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
 | `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset |
+| `<format>-autoexec` | — | `true`: for that one output format (e.g. `pdf-autoexec`, `html-autoexec`), actually *run* the cell via a local `python3`/`python` and show its real output instead of the interactive editor/`pdf-fallback`. Falls back to the document's `pyodide: <format>-autoexec:` when unset |
 | `label` | — | unique ID of the cell (`data-id` attribute) |
 | `classes` | — | additional CSS classes |
 | `fig-cap` | — | caption for plots |
@@ -146,6 +147,8 @@ pyodide:
   feedback-storage: local        # default: local | session
   feedback-hints: true           # progressive hints (default: true)
   pdf-fallback: false            # PDF/docx: highlight {pyodide-python} as plain Python (default: false)
+  pdf-autoexec: false            # PDF/docx: actually run {pyodide-python} cells and show real output (default: false)
+  html-autoexec: false           # same, but for the HTML page itself (default: false)
   lang: de                       # UI language (default: en)
 ```
 
@@ -487,6 +490,9 @@ thread, since the runtime lives in the worker.
   widgets (zooming into the plot) don't exist there – a second Pyodide
   instance handles that (see Canvas plots). Animations run entirely in the
   worker regardless.
+- `<format>-autoexec` needs a `python3`/`python` interpreter on the machine
+  that renders the document, and only reproduces stdout/the trailing
+  expression's value, not matplotlib figures or other rich HTML output.
 
 ---
 

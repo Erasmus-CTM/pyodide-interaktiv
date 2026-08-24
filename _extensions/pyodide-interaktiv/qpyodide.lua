@@ -19,6 +19,13 @@
 ---   before-body: qpyodide-monaco-editor-init.html
 ---   after-body : qpyodide-cell-classes.js
 ---                qpyodide-cell-initialization.js
+---
+--- A cell/document can also opt into `*-autoexec` (e.g. `pdf-autoexec`,
+--- `html-autoexec`): instead of the interactive editor or a highlighted
+--- source-only fallback, the cell is actually run via a local `python3`/
+--- `python` interpreter at render time and replaced with its real output.
+--- See collectAndRunAutoexecCells() / cellWantsAutoexecHere() below and the
+--- README's "Real, executed output" section.
 ----
 
 ----
@@ -102,6 +109,29 @@ local feedbackHints = "true"
 local pdfFallback = "false"
 
 ----
+--- Setup variables for real, executed output in any format (`*-autoexec`)
+
+-- Recognized `<format>-autoexec` targets, in priority order. A render only
+-- ever targets a single output format, so at most one of these ever
+-- matches during one render pass; the first match becomes the active key
+-- (e.g. "pdf-autoexec"). Add another Quarto format name here to support
+-- e.g. `revealjs-autoexec` or `pptx-autoexec`.
+local autoexecFormats = { "html", "pdf", "docx" }
+
+-- Document-wide defaults, one per `<format>-autoexec` key found under the
+-- `pyodide:` YAML block (e.g. `pyodide: { pdf-autoexec: true, html-autoexec:
+-- true }`). Off by default; a cell's own `#| <format>-autoexec: ...`
+-- overrides its document-wide default, the same way `pdf-fallback` does.
+local autoexecDocDefaults = {}
+
+-- Output of running every opted-in cell for this render pass, filled in by
+-- collectAndRunAutoexecCells() -- a Pandoc-level pass that runs before
+-- enablePyodideCodeCell ever sees a cell. Stays nil if nothing opted in, or
+-- if no Python interpreter could be found.
+local autoexecResults = nil
+local autoexecIndex = 0
+
+----
 --- Setup variables for tracking number of code cells
 
 -- Define a counter variable
@@ -143,6 +173,16 @@ end
 -- Check if variable is present
 local function isVariablePopulated(s)
   return not isVariableEmpty(s)
+end
+
+-- Check if a raw string/boolean option value (document YAML or `#|` cell
+-- comment) should be interpreted as "on".
+local function isTruthy(value)
+  if isVariableEmpty(value) then
+    return false
+  end
+  local normalized = tostring(value):lower()
+  return normalized == "true" or normalized == "1"
 end
 
 -- Copy the top level value and its direct children
@@ -287,6 +327,16 @@ local function setPyodideInitializationOptions(meta)
   -- `#| pdf-fallback: ...`.
   if isVariablePopulated(pyodide['pdf-fallback']) then
     pdfFallback = pandoc.utils.stringify(pyodide["pdf-fallback"])
+  end
+
+  -- Document-wide defaults for real, executed output. Every `<name>-
+  -- autoexec` key under `pyodide:` is captured here, whether or not "name"
+  -- is a format this particular render matches -- only the one matching
+  -- the currently active render (see autoexecFormats) is ever read back.
+  for key, value in pairs(pyodide) do
+    if type(key) == "string" and key:match("%-autoexec$") then
+      autoexecDocDefaults[key] = pandoc.utils.stringify(value)
+    end
   end
 
   -- Attempt to install different packages.
@@ -587,6 +637,11 @@ local function resolveFoldState(cellOverride)
   end
 end
 
+-- Whether a CodeBlock is one of this extension's `{pyodide-python}` cells.
+local function isPyodideCell(el)
+  return el.attr and el.attr.classes:includes("{pyodide-python}")
+end
+
 -- Extract Quarto code cell options from the block's text
 local function extractCodeBlockOptions(block)
 
@@ -634,12 +689,236 @@ local function isPdfFallbackEnabled(value)
   return normalized == "true" or normalized == "python" or normalized == "1"
 end
 
--- Transform a {pyodide-python} code block into a Pyodide interactive editor.
+-- Which `<format>-autoexec` key applies to the format currently being
+-- rendered, or nil if none of autoexecFormats matches (autoexec then simply
+-- doesn't apply for this render -- existing pdf-fallback/interactive
+-- handling is unaffected).
+local function resolveAutoexecOptionKeyForCurrentFormat()
+  for _, format in ipairs(autoexecFormats) do
+    if quarto.doc.is_format(format) then
+      return format .. "-autoexec"
+    end
+  end
+  return nil
+end
+
+-- Whether one cell wants real, executed output for the format currently
+-- being rendered: the cell's own `#| <format>-autoexec: ...` overrides the
+-- document-wide default for that same key.
+local function cellWantsAutoexecHere(cellOptions)
+  local key = resolveAutoexecOptionKeyForCurrentFormat()
+  if key == nil then
+    return false
+  end
+
+  local override = cellOptions[key]
+  if isVariablePopulated(override) then
+    return isTruthy(override)
+  end
+
+  return isTruthy(autoexecDocDefaults[key])
+end
+
+----
+--- Temp-file helpers for autoexec. Deliberately not os.tmpname(): on
+--- Windows it can hand back a root-directory path that io.open() then
+--- fails to create.
+
+local autoexecTmpCounter = 0
+math.randomseed(os.time())
+
+local function autoexecTmpDir()
+  return os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
+end
+
+local function makeAutoexecTmpPath(suffix)
+  autoexecTmpCounter = autoexecTmpCounter + 1
+  local sep = package.config:sub(1, 1)
+  return autoexecTmpDir() .. sep .. "qpyautoexec_" .. tostring(os.time()) .. "_" ..
+      tostring(math.random(100000, 999999)) .. "_" .. autoexecTmpCounter .. suffix
+end
+
+-- A trailing bare expression's value is printed too (if not None), mirroring
+-- how the interactive Pyodide runtime auto-displays a cell's last
+-- expression. Everything else only ever prints what the code itself prints.
+local autoexecDriverPrelude = [[
+import ast, sys, traceback
+
+_ns = {}
+
+def _run(i, path, label):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            src = f.read()
+        # Compiled under a short synthetic filename (not the real temp
+        # path): keeps tracebacks short enough to fit the page and avoids
+        # leaking local temp-directory/username paths into the document.
+        tree = ast.parse(src, filename=label, mode="exec")
+        last_expr = None
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            last_expr = tree.body.pop()
+        exec(compile(tree, label, "exec"), _ns)
+        if last_expr is not None:
+            value = eval(compile(ast.Expression(last_expr.value), label, "eval"), _ns)
+            if value is not None:
+                print(str(value))
+    except Exception:
+        # Printed to stdout on purpose: only stdout is captured by the Lua
+        # side (pandoc.pipe), so an error must land there to end up in the
+        # cell's own output slot instead of vanishing into the render log.
+        # Frames are filtered down to the cell's own code (filename ==
+        # label): without this, every traceback would also show this
+        # driver's own exec/eval call sites and their real temp-file paths
+        # (leaking the local username/temp dir into the rendered document),
+        # the same way Jupyter/IPython hide their own execution machinery
+        # from a cell's traceback.
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        frames = [f for f in traceback.extract_tb(exc_tb) if f.filename == label]
+        print("Traceback (most recent call last):")
+        sys.stdout.writelines(traceback.format_list(frames))
+        sys.stdout.writelines(traceback.format_exception_only(exc_type, exc_value))
+    sys.stdout.flush()
+    print("<<<QPYAUTOEXEC_END_%d>>>" % i)
+
+]]
+
+-- Run every opted-in cell's cleaned source in ONE Python subprocess, in
+-- document order, sharing one namespace -- mirroring how the interactive
+-- Pyodide runtime in the browser keeps state across cells. Returns a list
+-- of per-cell output strings, or nil if no interpreter could be found.
+local function runAutoexecCellsForReal(cellSources)
+  if #cellSources == 0 then
+    return {}
+  end
+
+  local tmpFiles = {}
+  local driverLines = { autoexecDriverPrelude }
+  for i, src in ipairs(cellSources) do
+    local path = makeAutoexecTmpPath(".py")
+    local f = io.open(path, "w")
+    if not f then
+      io.stderr:write("qpyodide.lua: could not write temp file '" .. path .. "' for autoexec.\n")
+      return nil
+    end
+    table.insert(tmpFiles, path)
+    f:write(src)
+    f:close()
+    local escapedPath = path:gsub("\\", "\\\\")
+    table.insert(driverLines, string.format('_run(%d, "%s", "<cell %d>")', i, escapedPath, i))
+  end
+
+  local driverPath = makeAutoexecTmpPath("_driver.py")
+  local df = io.open(driverPath, "w")
+  if not df then
+    io.stderr:write("qpyodide.lua: could not write temp driver file '" .. driverPath .. "' for autoexec.\n")
+    return nil
+  end
+  table.insert(tmpFiles, driverPath)
+  df:write(table.concat(driverLines, "\n"))
+  df:close()
+
+  local candidates = { "python3", "python" }
+  local combinedOutput = nil
+  for _, cmd in ipairs(candidates) do
+    local ok, result = pcall(pandoc.pipe, cmd, { driverPath }, "")
+    if ok then
+      combinedOutput = result
+      break
+    end
+  end
+
+  for _, path in ipairs(tmpFiles) do
+    os.remove(path)
+  end
+
+  if combinedOutput == nil then
+    io.stderr:write(
+      "qpyodide.lua: no Python interpreter found for autoexec (tried python3, python) -- " ..
+      "leaving opted-in {pyodide-python} cells at their normal, non-autoexec handling.\n"
+    )
+    return nil
+  end
+
+  -- Python's print() on Windows writes CRLF (text-mode stdout); normalize
+  -- to LF so the marker search below matches regardless of platform.
+  combinedOutput = combinedOutput:gsub("\r\n", "\n")
+
+  local outputs = {}
+  local rest = combinedOutput
+  for i = 1, #cellSources do
+    local marker = "<<<QPYAUTOEXEC_END_" .. i .. ">>>\n"
+    local startPos, endPos = rest:find(marker, 1, true)
+    if startPos then
+      outputs[i] = rest:sub(1, startPos - 1)
+      rest = rest:sub(endPos + 1)
+    else
+      outputs[i] = rest
+      rest = ""
+    end
+  end
+
+  return outputs
+end
+
+-- Pandoc-level pass that runs before enablePyodideCodeCell ever sees a
+-- cell: collect every opted-in {pyodide-python} cell's cleaned source, in
+-- document order, and run them all together, once -- so state shared
+-- between cells (e.g. a variable from an earlier cell) works the same way
+-- it does in the interactive, browser-side Pyodide runtime.
+local function collectAndRunAutoexecCells(doc)
+  if resolveAutoexecOptionKeyForCurrentFormat() == nil then
+    return doc
+  end
+
+  local cellSources = {}
+  doc:walk({
+    CodeBlock = function(el)
+      if isPyodideCell(el) then
+        local code, cellOptions = extractCodeBlockOptions(el)
+        if cellWantsAutoexecHere(cellOptions) then
+          table.insert(cellSources, code)
+        end
+      end
+      return el
+    end
+  })
+
+  autoexecResults = runAutoexecCellsForReal(cellSources)
+  autoexecIndex = 0
+
+  return doc
+end
+
+-- Transform a {pyodide-python} code block into its real, executed output
+-- (`*-autoexec`), a Pyodide interactive editor, or plain highlighted source
+-- (`pdf-fallback`) -- depending on the current format and the cell's options.
 local function enablePyodideCodeCell(el)
 
   -- Not a Pyodide cell: leave untouched regardless of output format.
-  if not (el.attr and el.attr.classes:includes("{pyodide-python}")) then
+  if not isPyodideCell(el) then
     return el
+  end
+
+  local cellCode, cellOptions = extractCodeBlockOptions(el)
+
+  -- Real, executed output takes priority over both the interactive HTML
+  -- editor and the PDF/docx `pdf-fallback` static-highlight path below.
+  -- collectAndRunAutoexecCells() already ran every opted-in cell (this one
+  -- included) before this function ever sees them, in the same document
+  -- order used here, so autoexecIndex lines up with autoexecResults.
+  if cellWantsAutoexecHere(cellOptions) then
+    autoexecIndex = autoexecIndex + 1
+
+    if autoexecResults ~= nil then
+      local outputText = (autoexecResults[autoexecIndex] or ""):gsub("%s+$", "")
+      local blocks = { pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {})) }
+      if outputText ~= "" then
+        table.insert(blocks, pandoc.CodeBlock(outputText, pandoc.Attr("", { "cell-output", "cell-output-stdout" }, {})))
+      end
+      return pandoc.Div(blocks, pandoc.Attr("", { "cell" }, {}))
+    end
+    -- No Python interpreter was found: fall through to the normal handling
+    -- below instead of breaking the render.
   end
 
   -- Non-interactive output formats (PDF, docx, ...): the client-side
@@ -654,8 +933,6 @@ local function enablePyodideCodeCell(el)
   -- a real Python engine would otherwise have hidden are stripped either
   -- way. Off by default: the block passes through unchanged.
   if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
-    local cellCode, cellOptions = extractCodeBlockOptions(el)
-
     local fallback = pdfFallback
     if isVariablePopulated(cellOptions["pdf-fallback"]) then
       fallback = cellOptions["pdf-fallback"]
@@ -670,13 +947,6 @@ local function enablePyodideCodeCell(el)
 
   -- We detected a Pyodide cell
   missingPyodideCell = false
-
-  -- Local code cell storage
-  local cellOptions = {}
-  local cellCode = ''
-
-  -- Convert cell-specific option commands into attributes
-  cellCode, cellOptions = extractCodeBlockOptions(el)
 
   -- Resolve the initial fold state against Quarto's own `code-fold`
   -- (document/project/profile), with the cell's own `#| code-fold:` taking
@@ -718,6 +988,9 @@ end
 return {
   {
     Meta = setPyodideInitializationOptions
+  },
+  {
+    Pandoc = collectAndRunAutoexecCells
   },
   {
     CodeBlock = enablePyodideCodeCell
