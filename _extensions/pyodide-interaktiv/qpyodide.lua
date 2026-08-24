@@ -782,6 +782,59 @@ def _run(i, path, label):
 
 ]]
 
+-- Extract the top-level module names referenced via `import X` / `from X
+-- import Y` across every opted-in cell's source (e.g. `scipy.linalg` ->
+-- `scipy`; a submodule import says nothing extra about whether the
+-- top-level package is installed). Used to test candidate interpreters
+-- below for whether they actually have what the cells need, not just
+-- whether they exist.
+local function extractImportedModules(cellSources)
+  local seen = {}
+  local modules = {}
+
+  local function addModule(name)
+    local top = name:match("^([%w_]+)")
+    if top and not seen[top] then
+      seen[top] = true
+      table.insert(modules, top)
+    end
+  end
+
+  for _, src in ipairs(cellSources) do
+    for line in src:gmatch("([^\r\n]+)") do
+      local fromModule = line:match("^%s*from%s+([%w_%.]+)%s+import")
+      if fromModule then
+        addModule(fromModule)
+      else
+        local importList = line:match("^%s*import%s+(.+)$")
+        if importList then
+          importList = importList:gsub("#.*$", "")
+          for entry in importList:gmatch("[^,]+") do
+            local name = entry:match("^%s*([%w_%.]+)")
+            if name then
+              addModule(name)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return modules
+end
+
+-- Whether interpreter `cmd` exists on PATH AND can import every module in
+-- `modules` (an empty list only proves existence). Never throws.
+local function candidateSatisfiesImports(cmd, modules)
+  if #modules == 0 then
+    local ok = pcall(pandoc.pipe, cmd, { "--version" }, "")
+    return ok
+  end
+  local checkScript = "import " .. table.concat(modules, ", ")
+  local ok = pcall(pandoc.pipe, cmd, { "-c", checkScript }, "")
+  return ok
+end
+
 -- Run every opted-in cell's cleaned source in ONE Python subprocess, in
 -- document order, sharing one namespace -- mirroring how the interactive
 -- Pyodide runtime in the browser keeps state across cells. Returns a list
@@ -817,13 +870,40 @@ local function runAutoexecCellsForReal(cellSources)
   df:write(table.concat(driverLines, "\n"))
   df:close()
 
+  -- Multiple Python installs on the same machine are common (venvs, conda
+  -- envs, Windows Store stubs, ...), and merely existing on PATH says
+  -- nothing about which one actually has the packages the cells import
+  -- (e.g. a venv with numpy installed shadows only "python.exe" on
+  -- Windows, not "python3.exe", so an existence-only check can silently
+  -- pick a different, unrelated interpreter). Prefer whichever candidate
+  -- can resolve every import the opted-in cells need; only fall back to
+  -- "first one that merely exists" if none of them fully qualify, so cells
+  -- still run and surface a real traceback naming the actual missing
+  -- module instead of doing nothing.
   local candidates = { "python3", "python" }
-  local combinedOutput = nil
+  local requiredModules = extractImportedModules(cellSources)
+
+  local chosenCmd = nil
   for _, cmd in ipairs(candidates) do
-    local ok, result = pcall(pandoc.pipe, cmd, { driverPath }, "")
+    if candidateSatisfiesImports(cmd, requiredModules) then
+      chosenCmd = cmd
+      break
+    end
+  end
+  if chosenCmd == nil then
+    for _, cmd in ipairs(candidates) do
+      if candidateSatisfiesImports(cmd, {}) then
+        chosenCmd = cmd
+        break
+      end
+    end
+  end
+
+  local combinedOutput = nil
+  if chosenCmd ~= nil then
+    local ok, result = pcall(pandoc.pipe, chosenCmd, { driverPath }, "")
     if ok then
       combinedOutput = result
-      break
     end
   end
 
