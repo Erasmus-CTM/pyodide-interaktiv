@@ -142,13 +142,21 @@ local qPyodideCapturedCodeBlocks = {}
 
 -- Initialize a table that contains the default cell-level options
 local qPyodideDefaultCellOptions = {
-  ["context"] = "interactive",
+  -- Left unset (rather than "interactive"): enablePyodideCodeCell() needs
+  -- to tell "author wrote an explicit `#| context:`" apart from "nothing
+  -- set, derive one from echo/include" -- qpyodideCreateCell()'s own
+  -- switch already falls back to InteractiveCell for anything else
+  -- (including ""), so leaving it unset here changes nothing observable.
+  ["context"] = "",
   ["warning"] = "true",
   ["message"] = "true",
   ["results"] = "markup",
   ["read-only"] = "false",
   ["output"] = "true",
   ["comment"] = "",
+  ["eval"] = "",
+  ["echo"] = "",
+  ["include"] = "",
   ["code-fold"] = "",
   ["pdf-fallback"] = "",
   ["label"] = "",
@@ -637,6 +645,31 @@ local function resolveFoldState(cellOverride)
   end
 end
 
+-- Resolve whether a `{pyodide-python}` cell is allowed to ever actually
+-- execute -- real subprocess execution via `*-autoexec`, or being handed to
+-- the interactive Pyodide editor at all -- mirroring a real `{python}`
+-- cell's `eval` option (and resolved the same cascading way
+-- resolveFoldState() resolves `code-fold`).
+--
+-- Precedence:
+--   1. `#| eval: ...` set directly on the cell
+--   2. Quarto's own `eval:` -- document YAML, a profile, or the project's
+--      `_quarto.yml`
+--   3. Neither set -> true (Quarto's own default: cells execute)
+local function resolveEvalEnabled(cellOverride)
+  return isTruthy(resolveQuartoParam("eval", cellOverride, "true"))
+end
+
+-- `echo`/`include`, resolved the same cascading way as `eval` above (both
+-- default to true, matching Quarto's own defaults).
+local function resolveEchoEnabled(cellOverride)
+  return isTruthy(resolveQuartoParam("echo", cellOverride, "true"))
+end
+
+local function resolveIncludeEnabled(cellOverride)
+  return isTruthy(resolveQuartoParam("include", cellOverride, "true"))
+end
+
 -- Whether a CodeBlock is one of this extension's `{pyodide-python}` cells.
 local function isPyodideCell(el)
   return el.attr and el.attr.classes:includes("{pyodide-python}")
@@ -1008,7 +1041,7 @@ local function collectAndRunAutoexecCells(doc)
     CodeBlock = function(el)
       if isPyodideCell(el) then
         local code, cellOptions = extractCodeBlockOptions(el)
-        if cellWantsAutoexecHere(cellOptions) then
+        if resolveEvalEnabled(cellOptions["eval"]) and cellWantsAutoexecHere(cellOptions) then
           table.insert(cellSources, code)
         end
       end
@@ -1034,6 +1067,42 @@ local function enablePyodideCodeCell(el)
 
   local cellCode, cellOptions = extractCodeBlockOptions(el)
 
+  -- `eval: false` (cell-level `#|` override, cascading through Quarto's own
+  -- document/project default the same way `code-fold` does): a real
+  -- `{python}` cell with `eval: false` never executes and only shows its
+  -- source -- often on purpose, for a syntax snippet that references
+  -- variables that don't actually exist (e.g. `A[i,:]` to illustrate
+  -- indexing). `{pyodide-python}` has no such restraint by default: the
+  -- interactive editor lets a reader click "Run" regardless, and
+  -- `*-autoexec` actually executes the cell for real at render time --
+  -- both would otherwise ignore `eval` entirely and, for a snippet like
+  -- that, surface a real NameError. Honor it the same way in every format,
+  -- ahead of autoexec and the interactive editor alike: render as plain,
+  -- highlighted-but-never-executed Python source, identical to the
+  -- `pdf-fallback` block below.
+  if not resolveEvalEnabled(cellOptions["eval"]) then
+    return pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, {"python"}, {}))
+  end
+
+  local echoEnabled = resolveEchoEnabled(cellOptions["echo"])
+  local includeEnabled = resolveIncludeEnabled(cellOptions["include"])
+
+  -- Map `echo`/`include` onto this extension's own interactive/output/setup
+  -- cell kinds (see qpyodide-cell-classes.js) for the interactive HTML/
+  -- markdown path below, the same way real Quarto's `echo`/`include`
+  -- decide what a real, executed cell shows: `include: false` -> "setup"
+  -- (runs invisibly at startup, output discarded -- nothing shown at all),
+  -- `echo: false` -> "output" (runs automatically at startup, shows only
+  -- the output, never the source). An author's own explicit `#| context:`
+  -- always wins over both.
+  if not isVariablePopulated(cellOptions["context"]) then
+    if not includeEnabled then
+      cellOptions["context"] = "setup"
+    elseif not echoEnabled then
+      cellOptions["context"] = "output"
+    end
+  end
+
   -- Real, executed output takes priority over both the interactive HTML
   -- editor and the PDF/docx `pdf-fallback` static-highlight path below.
   -- collectAndRunAutoexecCells() already ran every opted-in cell (this one
@@ -1043,9 +1112,20 @@ local function enablePyodideCodeCell(el)
     autoexecIndex = autoexecIndex + 1
 
     if autoexecResults ~= nil then
+      -- `include: false`: the code still ran for real (it's still in
+      -- collectAndRunAutoexecCells()'s cellSources, sharing state with
+      -- every other cell exactly like a real `include: false` chunk would),
+      -- but neither its source nor its output ever appear in the document.
+      if not includeEnabled then
+        return {}
+      end
+
       local cellResult = autoexecResults[autoexecIndex] or { text = "", images = {} }
       local outputText = (cellResult.text or ""):gsub("%s+$", "")
-      local blocks = { pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {})) }
+      local blocks = {}
+      if echoEnabled then
+        table.insert(blocks, pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {})))
+      end
       if outputText ~= "" then
         table.insert(blocks, pandoc.CodeBlock(outputText, pandoc.Attr("", { "cell-output", "cell-output-stdout" }, {})))
       end
@@ -1076,6 +1156,13 @@ local function enablePyodideCodeCell(el)
     end
 
     if isPdfFallbackEnabled(fallback) then
+      -- This path never actually executes the cell (no autoexec here), so
+      -- there is no separate output to fall back to once the source is
+      -- hidden -- `echo: false` therefore has nothing left to show either,
+      -- same end result as `include: false`.
+      if not includeEnabled or not echoEnabled then
+        return {}
+      end
       return pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, {"python"}, {}))
     end
 
