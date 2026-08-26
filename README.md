@@ -528,8 +528,23 @@ thread, since the runtime lives in the worker.
   instance handles that (see Canvas plots). Animations run entirely in the
   worker regardless.
 - `<format>-autoexec` needs a `python3`/`python` interpreter on the machine
-  that renders the document, and only reproduces stdout/the trailing
-  expression's value, not matplotlib figures or other rich HTML output.
+  that renders the document, and reproduces stdout, the trailing
+  expression's value and matplotlib figures – but no other rich HTML
+  output.
+- `<format>-autoexec` figures are shown by `plt.show()` / `fig.show()`,
+  exactly like in the browser: a figure that is never shown is discarded
+  at the end of the cell instead of spilling into the next one.
+  For `pdf` the PNGs are written to a `qpyodide-figures/` directory next
+  to the generated `.tex` (LaTeX runs as a separate step and needs a real
+  file); worth adding to `.gitignore`. Every other format embeds them
+  directly into the document as `data:` URIs and leaves no files behind.
+- `<format>-autoexec` puts `#| fig-cap:` on the figure, so it is captioned
+  and numbered – but `#| label: fig-...` cannot be cross-referenced with
+  `@fig-...`. Quarto builds its cross-reference index while normalizing
+  the parsed document, which happens before any extension filter runs, so
+  a figure created by this filter is invisible to it. The reference stays
+  unresolved (`?@fig-...`). Use a [marker cell](#marker-cells-real-quarto-crossrefs)
+  instead when the figure needs a working reference.
 - A [marker cell](#marker-cells-real-quarto-crossrefs) with `#| echo: false` stays
   Quarto's plain static output instead of becoming interactive: Quarto's own engine
   already omits the source from the AST before this filter ever sees the cell, so

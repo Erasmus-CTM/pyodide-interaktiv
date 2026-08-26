@@ -775,13 +775,61 @@ local function makeAutoexecTmpPath(suffix)
       tostring(math.random(100000, 999999)) .. "_" .. autoexecTmpCounter .. suffix
 end
 
+-- Where a captured matplotlib figure ends up, for the format currently
+-- being rendered.
+--
+-- LaTeX-based output (`pdf`) needs a real file on disk: Quarto hands the
+-- generated `.tex` to a separate LaTeX run, so `\includegraphics` has to
+-- name a path that still exists and still resolves at that point. The
+-- files are therefore written into this directory, relative to the
+-- render's working directory -- the same directory the `.tex` itself is
+-- written to and compiled in, so the path that lands in the document is
+-- relative and portable, exactly like Quarto's own `<doc>_files/figure-pdf`
+-- output. (An absolute path into the system temp directory would "work"
+-- only on the machine that rendered it, leaks the local username into the
+-- document, and breaks the moment the temp directory is cleaned.)
+--
+-- Everything else (`html`, `docx`) is written by pandoc itself, which
+-- resolves a `data:` URI through its media bag -- so the PNG is embedded
+-- straight into the document and no files are left behind in the source
+-- tree at all. That also sidesteps HTML resource copying entirely: a
+-- relative path would otherwise have to survive Quarto's per-page URL
+-- rewriting (chapter pages live one directory down from the render root).
+local autoexecFigureDirName = "qpyodide-figures"
+
+local function autoexecFigureDir()
+  if quarto.doc.is_format("pdf") then
+    return autoexecFigureDirName
+  end
+  return ""
+end
+
 -- A trailing bare expression's value is printed too (if not None), mirroring
 -- how the interactive Pyodide runtime auto-displays a cell's last
 -- expression. Everything else only ever prints what the code itself prints.
-local autoexecDriverPrelude = [[
+--
+-- `__QPY_FIG_DIR__` is substituted by autoexecDriverPrelude() below.
+local autoexecDriverPreludeTemplate = [==[
 import ast, sys, traceback
 
+# Whatever this prints is read back by the Lua side as UTF-8 (pandoc's own
+# encoding). Python only defaults to UTF-8 for a pipe on some platforms --
+# on Windows it defaults to the ANSI code page, where a single non-encodable
+# character in a cell's output raises UnicodeEncodeError and takes down the
+# whole driver, losing every remaining cell's output. Pin it.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 _ns = {}
+
+# Directory for captured figures, relative to this process's working
+# directory (inherited from pandoc). Empty means "embed the PNG as a
+# data: URI instead of writing a file" -- see autoexecFigureDir().
+_qpy_fig_dir = "__QPY_FIG_DIR__"
+_qpy_cell_index = 0
+_qpy_fig_index = 0
 
 # Real Python has no display protocol of its own, so plt.show() by default
 # tries to pop up an interactive window using whatever GUI backend happens
@@ -789,32 +837,59 @@ _ns = {}
 # would never end up in the rendered document anyway. Mirror what the
 # browser-side Pyodide worker does (see PY_SETUP in
 # qpyodide-document-engine-initialization.js): force the non-interactive
-# Agg backend and turn plt.show() into "save every open figure to a PNG,
-# print its path on a marker line, close it". The Lua side (see
-# extractAutoexecFigures()) pulls those marker lines back out of the
-# captured stdout and turns them into real embedded images. Wrapped in
-# try/except so cells that never touch matplotlib still work on an
-# interpreter that doesn't have it installed.
+# Agg backend, and make plt.show() / fig.show() the trigger that releases a
+# figure as a PNG. Each released figure is announced on a marker line; the
+# Lua side (see splitAutoexecOutput()) pulls those back out of the captured
+# stdout and turns them into real images, in the order they were printed.
+# Wrapped in try/except so cells that never touch matplotlib still work on
+# an interpreter that does not have matplotlib installed.
 try:
     import matplotlib
     matplotlib.use("Agg")
-    from matplotlib import pyplot as _qpyautoexec_plt
+    from matplotlib import pyplot as _qpy_plt
+    import matplotlib.figure as _qpy_figmod
 
-    def _qpyautoexec_show(*args, **kwargs):
-        import os, tempfile
-        for num in _qpyautoexec_plt.get_fignums():
-            fig = _qpyautoexec_plt.figure(num)
-            fd, path = tempfile.mkstemp(suffix=".png", prefix="qpyautoexec_fig_")
-            os.close(fd)
-            fig.savefig(path, bbox_inches="tight")
-            _qpyautoexec_plt.close(fig)
-            print("<<<QPYAUTOEXEC_FIG:%s>>>" % path)
+    def _qpy_release_figure(fig):
+        global _qpy_fig_index
+        import base64, io, os
+        _qpy_fig_index = _qpy_fig_index + 1
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        # Closing mirrors a local script: the shown window is gone, and a
+        # following plt.plot() starts a new figure instead of drawing into
+        # the old one.
+        _qpy_plt.close(fig)
+        data = buf.getvalue()
+        if _qpy_fig_dir:
+            os.makedirs(_qpy_fig_dir, exist_ok=True)
+            # Deterministic name: re-rendering overwrites the previous
+            # run's figure instead of piling up a new file every time.
+            name = "cell-%d-figure-%d.png" % (_qpy_cell_index, _qpy_fig_index)
+            path = os.path.join(_qpy_fig_dir, name)
+            with open(path, "wb") as fh:
+                fh.write(data)
+            ref = path.replace(os.sep, "/")
+        else:
+            ref = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+        print("<<<QPYAUTOEXEC_FIG:%s>>>" % ref)
 
-    _qpyautoexec_plt.show = _qpyautoexec_show
+    def _qpy_show(*args, **kwargs):
+        # get_fignums() returns a copy, so closing inside the loop is fine.
+        for num in _qpy_plt.get_fignums():
+            _qpy_release_figure(_qpy_plt.figure(num))
+
+    def _qpy_figure_show(self, *args, **kwargs):
+        _qpy_release_figure(self)
+
+    _qpy_plt.show = _qpy_show
+    _qpy_figmod.Figure.show = _qpy_figure_show
 except Exception:
-    pass
+    _qpy_plt = None
 
 def _run(i, path, label):
+    global _qpy_cell_index, _qpy_fig_index
+    _qpy_cell_index = i
+    _qpy_fig_index = 0
     try:
         with open(path, "r", encoding="utf-8") as f:
             src = f.read()
@@ -830,7 +905,13 @@ def _run(i, path, label):
             value = eval(compile(ast.Expression(last_expr.value), label, "eval"), _ns)
             if value is not None:
                 print(str(value))
-    except Exception:
+    except BaseException:
+        # BaseException, not Exception: a bare sys.exit() in one cell raises
+        # SystemExit, which would otherwise tear down the whole driver --
+        # every following cell then silently renders with no output at all,
+        # and (on a non-zero exit code) the Lua side sees the pipe fail and
+        # degrades the entire document. Report it as that one cell's error
+        # and carry on, the way IPython treats SystemExit in a notebook.
         # Printed to stdout on purpose: only stdout is captured by the Lua
         # side (pandoc.pipe), so an error must land there to end up in the
         # cell's own output slot instead of vanishing into the render log.
@@ -845,10 +926,26 @@ def _run(i, path, label):
         print("Traceback (most recent call last):")
         sys.stdout.writelines(traceback.format_list(frames))
         sys.stdout.writelines(traceback.format_exception_only(exc_type, exc_value))
+    # Discard figures the cell never showed, exactly like the browser-side
+    # runtime does after every cell run: one cell corresponds to one script
+    # run, so leftover open figures must not spill into the next cell's
+    # plt.show() (which would output them all at once, attached to the
+    # wrong cell).
+    if _qpy_plt is not None:
+        try:
+            _qpy_plt.close("all")
+        except Exception:
+            pass
     sys.stdout.flush()
     print("<<<QPYAUTOEXEC_END_%d>>>" % i)
 
-]]
+]==]
+
+-- The driver prelude with this render's figure directory baked in.
+local function autoexecDriverPrelude()
+  local dir = autoexecFigureDir():gsub("\\", "/")
+  return (autoexecDriverPreludeTemplate:gsub("__QPY_FIG_DIR__", dir))
+end
 
 -- Extract the top-level module names referenced via `import X` / `from X
 -- import Y` across every opted-in cell's source (e.g. `scipy.linalg` ->
@@ -903,36 +1000,97 @@ local function candidateSatisfiesImports(cmd, modules)
   return ok
 end
 
--- Pull "<<<QPYAUTOEXEC_FIG:path>>>" marker lines (one per matplotlib figure
--- captured by the plt.show() override in autoexecDriverPrelude) back out of
--- one cell's raw captured stdout. Returns the remaining text with those
--- marker lines removed, plus an ordered list of image paths.
-local function extractAutoexecFigures(text)
-  local images = {}
-  local keptLines = {}
-  for line in (text .. "\n"):gmatch("(.-)\n") do
-    local path = line:match("^<<<QPYAUTOEXEC_FIG:(.-)>>>$")
-    if path then
-      table.insert(images, path)
-    else
-      table.insert(keptLines, line)
+-- Split one cell's raw captured stdout into an ordered list of segments:
+--   { kind = "text",  value = <printed text> }
+--   { kind = "image", value = <path or data: URI> }
+-- The "<<<QPYAUTOEXEC_FIG:...>>>" marker lines are written by
+-- _qpy_release_figure() in the driver prelude, at the moment the figure is
+-- shown. Keeping the split ordered (rather than "all text, then all
+-- images") preserves the real interleaving of a cell that prints, plots,
+-- and then prints again -- the same order a reader sees in the browser.
+local function splitAutoexecOutput(text)
+  local segments = {}
+  local pendingLines = {}
+
+  local function flushText()
+    -- Trailing blank lines around a figure are an artifact of the marker
+    -- line sitting on its own line, not something the cell printed.
+    local block = table.concat(pendingLines, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+    pendingLines = {}
+    if block ~= "" then
+      table.insert(segments, { kind = "text", value = block })
     end
   end
-  return table.concat(keptLines, "\n"), images
+
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    local ref = line:match("^<<<QPYAUTOEXEC_FIG:(.-)>>>$")
+    if ref then
+      flushText()
+      table.insert(segments, { kind = "image", value = ref })
+    else
+      table.insert(pendingLines, line)
+    end
+  end
+  flushText()
+
+  return segments
+end
+
+-- Strip one layer of surrounding quotes from a raw `#|` option value
+-- (`#| fig-cap: "..."` keeps its quotes through extractCodeBlockOptions).
+local function stripOptionQuotes(value)
+  local text = tostring(value)
+  return text:match('^"(.*)"$') or text:match("^'(.*)'$") or text
+end
+
+-- Parse a caption written as Markdown (`#| fig-cap:` routinely contains
+-- inline math and emphasis) into inlines. Falls back to plain text if it
+-- somehow does not parse.
+local function captionInlines(text)
+  local ok, parsed = pcall(pandoc.read, text, "markdown")
+  if ok and parsed.blocks and #parsed.blocks > 0 and parsed.blocks[1].content then
+    return parsed.blocks[1].content
+  end
+  return { pandoc.Str(text) }
+end
+
+-- One captured figure as a block. A caption turns it into a real Figure,
+-- so the document shows it captioned and numbered like any other figure
+-- instead of as a bare, floating image.
+--
+-- The identifier from `#| label:` is set as well, but it does NOT make
+-- `@fig-...` resolve: Quarto builds its cross-reference index while
+-- normalizing the freshly parsed document, which happens before any
+-- extension filter runs, so a figure this filter creates is never in that
+-- index and the reference stays `?@fig-...`. Setting it anyway costs
+-- nothing and keeps the anchor in the output.
+local function autoexecImageBlock(ref, identifier, capText)
+  local image = pandoc.Image({}, ref)
+  if capText == nil or capText == "" then
+    if identifier == nil or identifier == "" then
+      return pandoc.Para({ image })
+    end
+    return pandoc.Para({ pandoc.Image({}, ref, "", pandoc.Attr(identifier, {}, {})) })
+  end
+  return pandoc.Figure(
+    { pandoc.Plain({ image }) },
+    { long = { pandoc.Plain(captionInlines(capText)) } },
+    pandoc.Attr(identifier or "", {}, {})
+  )
 end
 
 -- Run every opted-in cell's cleaned source in ONE Python subprocess, in
 -- document order, sharing one namespace -- mirroring how the interactive
 -- Pyodide runtime in the browser keeps state across cells. Returns a list
--- of per-cell { text = <stdout text>, images = <list of PNG paths> }
--- tables, or nil if no interpreter could be found.
+-- of per-cell segment lists (see splitAutoexecOutput()), or nil if no
+-- interpreter could be found.
 local function runAutoexecCellsForReal(cellSources)
   if #cellSources == 0 then
     return {}
   end
 
   local tmpFiles = {}
-  local driverLines = { autoexecDriverPrelude }
+  local driverLines = { autoexecDriverPrelude() }
   for i, src in ipairs(cellSources) do
     local path = makeAutoexecTmpPath(".py")
     local f = io.open(path, "w")
@@ -987,10 +1145,13 @@ local function runAutoexecCellsForReal(cellSources)
   end
 
   local combinedOutput = nil
+  local driverFailed = false
   if chosenCmd ~= nil then
     local ok, result = pcall(pandoc.pipe, chosenCmd, { driverPath }, "")
     if ok then
       combinedOutput = result
+    else
+      driverFailed = true
     end
   end
 
@@ -999,10 +1160,24 @@ local function runAutoexecCellsForReal(cellSources)
   end
 
   if combinedOutput == nil then
-    io.stderr:write(
-      "qpyodide.lua: no Python interpreter found for autoexec (tried python3, python) -- " ..
-      "leaving opted-in {pyodide-python} cells at their normal, non-autoexec handling.\n"
-    )
+    -- Two very different causes, and saying the wrong one costs hours:
+    -- either no interpreter exists at all, or one was found and its run
+    -- aborted (a cell killed the process, e.g. os._exit(), or the
+    -- interpreter itself crashed).
+    if driverFailed then
+      io.stderr:write(
+        "qpyodide.lua: autoexec ran '" .. tostring(chosenCmd) .. "' but it exited abnormally -- " ..
+        "one of the opted-in {pyodide-python} cells most likely terminated the interpreter. " ..
+        "No cell gets executed output this render; they fall back to plain highlighted source " ..
+        "in non-interactive formats, and to the interactive editor in HTML.\n"
+      )
+    else
+      io.stderr:write(
+        "qpyodide.lua: no Python interpreter found for autoexec (tried python3, python) -- " ..
+        "opted-in {pyodide-python} cells fall back to plain highlighted source in " ..
+        "non-interactive formats, and to the interactive editor in HTML.\n"
+      )
+    end
     return nil
   end
 
@@ -1012,6 +1187,7 @@ local function runAutoexecCellsForReal(cellSources)
 
   local outputs = {}
   local rest = combinedOutput
+  local truncatedReported = false
   for i = 1, #cellSources do
     local marker = "<<<QPYAUTOEXEC_END_" .. i .. ">>>\n"
     local startPos, endPos = rest:find(marker, 1, true)
@@ -1020,11 +1196,22 @@ local function runAutoexecCellsForReal(cellSources)
       rawText = rest:sub(1, startPos - 1)
       rest = rest:sub(endPos + 1)
     else
+      -- The driver never reported this cell as finished, so it stopped
+      -- somewhere inside it. Everything after it has no output either.
+      -- Without this warning that looks exactly like "the cell printed
+      -- nothing" -- silently, in the rendered document and in the log.
+      if not truncatedReported then
+        truncatedReported = true
+        io.stderr:write(
+          "qpyodide.lua: autoexec output stops inside cell " .. i .. " of " .. #cellSources ..
+          " -- the Python process ended early, so that cell and every one after it " ..
+          "have no executed output in this render.\n"
+        )
+      end
       rawText = rest
       rest = ""
     end
-    local text, images = extractAutoexecFigures(rawText)
-    outputs[i] = { text = text, images = images }
+    outputs[i] = splitAutoexecOutput(rawText)
   end
 
   return outputs
@@ -1257,22 +1444,57 @@ local function enablePyodideCodeCell(el)
         return {}
       end
 
-      local cellResult = autoexecResults[autoexecIndex] or { text = "", images = {} }
-      local outputText = (cellResult.text or ""):gsub("%s+$", "")
+      local segments = autoexecResults[autoexecIndex] or {}
       local blocks = {}
       if echoEnabled then
         table.insert(blocks, pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {})))
       end
-      if outputText ~= "" then
-        table.insert(blocks, pandoc.CodeBlock(outputText, pandoc.Attr("", { "cell-output", "cell-output-stdout" }, {})))
+
+      -- `#| label:` / `#| fig-cap:` are carried onto the cell's figure the
+      -- same way a real Quarto `{python}` cell carries them (see
+      -- autoexecImageBlock() for what the label can and cannot do here).
+      -- A cell has one label, so only the first figure can claim it; any
+      -- further figure from the same cell stays plain.
+      local figureLabel = stripOptionQuotes(cellOptions["label"] or "")
+      local figureCaption = stripOptionQuotes(cellOptions["fig-cap"] or "")
+      local labelUsed = false
+
+      for _, segment in ipairs(segments) do
+        if segment.kind == "image" then
+          if labelUsed then
+            table.insert(blocks, autoexecImageBlock(segment.value, "", ""))
+          else
+            labelUsed = true
+            table.insert(blocks, autoexecImageBlock(segment.value, figureLabel, figureCaption))
+          end
+        else
+          table.insert(blocks, pandoc.CodeBlock(segment.value,
+            pandoc.Attr("", { "cell-output", "cell-output-stdout" }, {})))
+        end
       end
-      for _, imagePath in ipairs(cellResult.images or {}) do
-        table.insert(blocks, pandoc.Para({ pandoc.Image({}, imagePath:gsub("\\", "/")) }))
-      end
+
       return pandoc.Div(blocks, pandoc.Attr("", { "cell" }, {}))
     end
-    -- No Python interpreter was found: fall through to the normal handling
-    -- below instead of breaking the render.
+
+    -- No Python interpreter was found on this machine (see
+    -- runAutoexecCellsForReal(), which already reported it on stderr).
+    -- Degrade to plain, highlighted-but-never-executed Python source
+    -- rather than falling through: a cell that opted into `*-autoexec`
+    -- has said what it wants, and that intent must not depend on whether
+    -- `pdf-fallback` also happens to be switched on. Without this, the
+    -- same cell would render as a raw, unstyled `{pyodide-python}` block
+    -- with its `#|` comment lines still visible.
+    --
+    -- Interactive formats keep their normal handling: there the Pyodide
+    -- editor below is the better degraded state, not static source.
+    if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+      -- Nothing ran, so there is no output left to show once the source
+      -- is hidden -- `echo: false` ends up the same as `include: false`.
+      if not includeEnabled or not echoEnabled then
+        return {}
+      end
+      return pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, { "python" }, {}))
+    end
   end
 
   -- Non-interactive output formats (PDF, docx, ...): the client-side
