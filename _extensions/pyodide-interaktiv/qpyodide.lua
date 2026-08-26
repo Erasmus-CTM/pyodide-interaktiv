@@ -15,7 +15,7 @@
 ---               qpyodide-document-status.js
 ---               qpyodide-feedback.js
 ---               qpyodide-document-engine-initialization.js
----               qpyodide-canvas-plots.js        (interaktive Plots, zweite Instanz)
+---               qpyodide-canvas-plots.js        (interactive plots, second instance)
 ---   before-body: qpyodide-monaco-editor-init.html
 ---   after-body : qpyodide-cell-classes.js
 ---                qpyodide-cell-initialization.js
@@ -489,13 +489,35 @@ local function ensurePyodideSetup()
   -- root. In website projects with subfolders (e.g. Chapter_1/, Chapter_2/,
   -- ...), the file would otherwise end up scattered across the source tree
   -- (e.g. Qmd-Files/Chapter_1/coi-serviceworker.js) instead of in the actual
-  -- output directory - the <script src="/coi-serviceworker.js"> reference
-  -- (rewritten correctly and relatively by Quarto, see below) then points
-  -- nowhere (404), even though the path in the HTML is correct.
-  -- quarto.project.output_directory points to the active profile's actual
-  -- output directory (e.g. docs/de); writing there fixes this. For
-  -- standalone documents without a project (quarto.project is then nil),
-  -- the previous document-relative path remains as a fallback.
+  -- output directory. quarto.project.output_directory points to the active
+  -- profile's actual output directory (e.g. docs/de); writing there fixes
+  -- this. For standalone documents without a project (quarto.project is
+  -- then nil), the previous document-relative path remains as a fallback.
+  --
+  -- The `<script src="...">` reference must be relative, not root-absolute
+  -- (`/coi-serviceworker.js`): a root-absolute path resolves against the
+  -- filesystem root for a standalone document opened directly as a local
+  -- `file://`, which 404s every time. But a *plain* relative path (just
+  -- "coi-serviceworker.js") breaks the opposite way in a project with
+  -- chapters in subfolders: the file is written once, at the project output
+  -- root, while a nested chapter's own page resolves that same relative
+  -- reference against ITS OWN directory instead. Quarto's own
+  -- `quarto.project.offset` is exactly the relative path back from the
+  -- current page to the project root (measured: "." at the root, ".." one
+  -- level down, etc. -- always populated, even for a standalone document
+  -- with no project at all, where it is also "."). Prepending it makes the
+  -- reference correct at every nesting depth AND for a standalone document.
+  --
+  -- Measured exception that this cannot fix: a standalone document rendered
+  -- with `embed-resources: true` still ends up with an absolute
+  -- `/coi-serviceworker.js` in the final HTML, no matter what is written
+  -- here -- Quarto's own resource-embedding pass for that format rewrites
+  -- it afterwards, outside this filter's control. A service worker cannot
+  -- be embedded as a `data:` URI either way (browsers require a real
+  -- http(s) URL for `serviceWorker.register()`), so COI silently does not
+  -- come up in that one combination; the extension already degrades
+  -- gracefully without it (Stop still works, as a hard worker restart --
+  -- see Known limitations).
   local coiContent = readTemplateFile("coi-serviceworker.js")
   if coiContent then
     local coiPath = "coi-serviceworker.js"
@@ -508,7 +530,11 @@ local function ensurePyodideSetup()
       coiOut:close()
     end
   end
-  quarto.doc.include_text("in-header", '<script src="/coi-serviceworker.js"></script>')
+  local coiOffset = "."
+  if quarto.project and isVariablePopulated(quarto.project.offset) then
+    coiOffset = quarto.project.offset
+  end
+  quarto.doc.include_text("in-header", '<script src="' .. coiOffset .. '/coi-serviceworker.js"></script>')
 
   local initializedConfigurationPyodide = initializationPyodide()
 
@@ -518,9 +544,17 @@ local function ensurePyodideSetup()
   -- Embed Support Files to Avoid Resource Registration Issues
   -- Note: We're not able to use embed-resources due to the web assembly binary
   -- and the potential for additional service worker files.
+  --
+  -- Font Awesome via its JS (SVG) kit, not the CSS/webfont one: the CSS kit
+  -- needs its `@font-face` files, which `embed-resources: true` does not
+  -- reliably inline -- every fa-* icon (gear, spinner, copy, ...) silently
+  -- goes blank in a self-contained export. The JS kit replaces each
+  -- `<i class="fa-...">` with an inline `<svg>` instead, so nothing depends
+  -- on a separate font file surviving the bundling; markup elsewhere in
+  -- this extension is unchanged either way.
   quarto.doc.include_text("in-header", [[
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46.0/min/vs/editor/editor.main.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
   ]])
 
   -- Insert CSS styling and external style sheets

@@ -769,6 +769,22 @@ body.quarto-dark .qpyodide-input-echo {
   overflow: scroll;
 }
 
+/* Pan and zoom are toggles, but matplotlib renders no pressed state for
+   them: both buttons look identical whether the mode is on or off, so
+   nothing tells the reader whether dragging will move the plot or do
+   nothing at all. qpyodide-canvas-plots.js keeps this class in sync with
+   NavigationToolbar2.mode; colour it so the active tool is obvious.
+   The :hover twin is not redundant - matplotlib's own
+   `button.matplotlib-toolbar-button:hover` rule is injected into
+   <head> at runtime, i.e. after this file, and would otherwise win the
+   tie on equal specificity and hide the active state while hovering. */
+button.matplotlib-toolbar-button.qpyodide-toolbar-button-active,
+button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
+  color: #fff;
+  background: var(--bs-primary, #2780e3);
+  border-color: var(--bs-primary, #2780e3);
+}
+
 /* Interactive plots (canvas) --------------------------------------------
    The hint only shows while the second Pyodide instance is loading, or if
    the switchover fails. See qpyodide-canvas-plots.js. */
