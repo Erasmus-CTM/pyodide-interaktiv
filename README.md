@@ -519,7 +519,17 @@ thread, since the runtime lives in the worker.
 - The runtime is reloaded when navigating to another page of the project.
   Possible extension: a **SharedWorker**, to keep Pyodide alive across
   page navigations.
-- `embed-resources` is not supported because of the WebAssembly binaries.
+- `embed-resources: true` gives a single working file, but not an offline
+  one. The extension's own assets (Monaco, Font Awesome, the CSS and JS)
+  are inlined, so icons and the editor come up with no external files – but
+  the Pyodide runtime itself is still fetched from the CDN at load time,
+  because the WebAssembly binaries cannot be embedded. Two consequences,
+  both measured: the file has to be served over http(s), since opening it
+  directly as a local `file://` leaves the Pyodide worker unable to start;
+  and cross-origin isolation never comes up, because the COI service
+  worker is inlined along with everything else and a service worker cannot
+  register from an inlined script – so **Stop** degrades to a hard worker
+  restart, as described above.
 - HTML detection for rich output is heuristic: the return value of the
   last statement is only embedded as HTML if it looks entirely like HTML
   (starts with `<`, ends with `>`).

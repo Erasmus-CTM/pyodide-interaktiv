@@ -508,16 +508,17 @@ local function ensurePyodideSetup()
   -- with no project at all, where it is also "."). Prepending it makes the
   -- reference correct at every nesting depth AND for a standalone document.
   --
-  -- Measured exception that this cannot fix: a standalone document rendered
-  -- with `embed-resources: true` still ends up with an absolute
-  -- `/coi-serviceworker.js` in the final HTML, no matter what is written
-  -- here -- Quarto's own resource-embedding pass for that format rewrites
-  -- it afterwards, outside this filter's control. A service worker cannot
-  -- be embedded as a `data:` URI either way (browsers require a real
-  -- http(s) URL for `serviceWorker.register()`), so COI silently does not
-  -- come up in that one combination; the extension already degrades
-  -- gracefully without it (Stop still works, as a hard worker restart --
-  -- see Known limitations).
+  -- Measured exception that no path can fix: under `embed-resources: true`
+  -- Quarto inlines this script's whole content into the page, so the tag
+  -- has no `src` left at all. coi-serviceworker.js registers itself via
+  -- `document.currentScript.src`, which is "" for an inline script -- the
+  -- registration then resolves against the page itself and is rejected
+  -- (MIME `text/html`). Whatever this filter writes here is irrelevant in
+  -- that combination, and a service worker cannot be inlined or loaded
+  -- from a `data:` URI either way: browsers require a real, separate
+  -- same-origin script URL. So COI silently does not come up there; the
+  -- extension degrades gracefully without it (Stop still works, as a hard
+  -- worker restart -- see Known limitations).
   local coiContent = readTemplateFile("coi-serviceworker.js")
   if coiContent then
     local coiPath = "coi-serviceworker.js"
