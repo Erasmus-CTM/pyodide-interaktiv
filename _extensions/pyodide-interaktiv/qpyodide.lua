@@ -140,6 +140,10 @@ local qPyodideCounter = 0
 -- Initialize a table to store the CodeBlock elements
 local qPyodideCapturedCodeBlocks = {}
 
+-- Cells reserved via reservePendingCell() but not yet numbered -- see there
+-- for why numbering can't happen at reservation time.
+local pendingPyodideCells = {}
+
 -- Initialize a table that contains the default cell-level options
 local qPyodideDefaultCellOptions = {
   -- Left unset (rather than "interactive"): enablePyodideCodeCell() needs
@@ -1055,10 +1059,143 @@ local function collectAndRunAutoexecCells(doc)
   return doc
 end
 
+----
+--- Real `{python}` cells opted in via a `# pyodide: ...` marker comment,
+--- run for real by Quarto's own engine instead of `*-autoexec` -- the only
+--- way to get a genuine, cross-referenceable Quarto figure out of a cell
+--- that also becomes interactive in HTML. See handleMarkedCellDiv() below
+--- for the (much more common) case where the engine ran and wrapped the
+--- cell in a `.cell` Div; this part only handles what is left once that
+--- pass is done -- i.e. a marker that survived because no engine ever ran
+--- (`execute: enabled: false`), so the cell reaches here as a bare
+--- CodeBlock with no `.cell` wrapper at all.
+
+-- A marker line looks like `# pyodide: autorun, read-only=false` -- a plain
+-- `#` comment, not `#|`: it is the only per-cell channel that survives a
+-- real `{python}` cell's trip through Quarto's engine (see README/handoff
+-- for why `#|` itself does not). Returns the code with that one line
+-- removed, plus the parsed options table -- or `nil, nil` if the block
+-- carries no marker at all.
+local function extractPyodideMarker(code)
+  local options = nil
+  local keptLines = {}
+
+  for line in (code .. "\n"):gmatch("(.-)\n") do
+    local body = line:match("^%s*#%s*[Pp][Yy][Oo][Dd][Ii][Dd][Ee]%s*:%s*(.-)%s*$")
+    if body and options == nil then
+      options = {}
+      for entry in body:gmatch("[^,]+") do
+        local key, value = entry:match("^%s*([%w%-_]+)%s*=%s*(.-)%s*$")
+        if key == nil then
+          key = entry:match("^%s*([%w%-_]+)%s*$")
+          value = "true"
+        end
+        if key then
+          options[key] = value
+        end
+      end
+    else
+      table.insert(keptLines, line)
+    end
+  end
+
+  if options == nil then
+    return nil, nil
+  end
+  return table.concat(keptLines, "\n"):gsub("^%s*\n", ""):gsub("%s+$", ""), options
+end
+
+-- Reserve a spot for one interactive cell without numbering it yet, and
+-- hand back a placeholder to insert in its place. Numbering (and the
+-- qPyodideCapturedCodeBlocks push real cells share with the JS runtime)
+-- has to wait for resolvePendingCells() below: a marked cell's own
+-- position in qPyodideCounter order is decided by TWO separate, sequential
+-- filter passes (handleMarkedCellDiv() for an engine-ran cell,
+-- enablePyodideCodeCell() for everything else -- see the filter list at
+-- the end of this file), which only ever see the whole document in their
+-- own pass's document order, not interleaved with the other pass's cells.
+-- Numbering here directly would put every marked cell before every
+-- `{pyodide-python}` cell regardless of which actually comes first on the
+-- page -- harmless if the two never share state, but a real, silent
+-- NameError risk (wrong execution order in the browser's shared
+-- namespace) the moment a page mixes both and one depends on the other's
+-- variables. Deferring the count to a single later Span pass (Span is an
+-- Inline, so pandoc visits every one of these placeholders, regardless of
+-- which pass created it, in one true top-to-bottom sweep) fixes that.
+local function reservePendingCell(cellCode, cellOptions)
+  local idx = #pendingPyodideCells + 1
+  pendingPyodideCells[idx] = { code = cellCode, options = cellOptions }
+  return pandoc.Span({}, pandoc.Attr("", { "qpyodide-pending-cell" }, { ["data-qpyodide-pending"] = tostring(idx) }))
+end
+
+-- Give the final, resolved RawInline insertion point for one already-
+-- reserved cell, in true document order -- see resolvePendingCells() below,
+-- which is the only caller.
+local function finalizePendingCell(entry)
+  missingPyodideCell = false
+  qPyodideCounter = qPyodideCounter + 1
+  table.insert(qPyodideCapturedCodeBlocks, {
+    id = qPyodideCounter,
+    code = entry.code,
+    options = entry.options
+  })
+  return pandoc.RawInline("html", qPyodideJSCellInsertionCode(qPyodideCounter))
+end
+
+-- Runs as its own pass, after both handleMarkedCellDiv() and
+-- enablePyodideCodeCell() have replaced every interactive cell (marked or
+-- `{pyodide-python}`) with a pending placeholder: assigns the real,
+-- reading-order-correct qPyodideCounter id to each one it finds, in the
+-- order this single pass encounters them.
+local function resolvePendingCells(span)
+  if not span.classes:includes("qpyodide-pending-cell") then
+    return nil
+  end
+  local idx = tonumber(span.attributes["data-qpyodide-pending"])
+  return finalizePendingCell(pendingPyodideCells[idx])
+end
+
+-- Register one marked cell as an interactive Pyodide cell and hand back a
+-- placeholder for its insertion point -- see reservePendingCell() above.
+local function buildInteractiveCell(cellCode, markerOptions)
+  local cellOptions = mergeCellOptions(markerOptions)
+  cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
+  return reservePendingCell(cellCode, cellOptions)
+end
+
+-- Handle a marked `{python}` CodeBlock that reaches the CodeBlock filter
+-- still carrying its marker -- meaning no wrapping `.cell` Div consumed it
+-- first (handleMarkedCellDiv() runs as its own pass before this one), so
+-- Quarto's engine never actually ran this cell and there is no real,
+-- executed output to preserve either way. Returns nil for anything that
+-- isn't a marked `{python}` cell, so the caller can fall through to its own
+-- handling.
+local function enableMarkedPythonCodeCell(el)
+  if not el.attr.classes:includes("python") then
+    return nil
+  end
+
+  local cellCode, markerOptions = extractPyodideMarker(el.text)
+  if markerOptions == nil then
+    return nil
+  end
+
+  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+    return pandoc.CodeBlock(cellCode, el.attr)
+  end
+
+  return buildInteractiveCell(cellCode, markerOptions)
+end
+
 -- Transform a {pyodide-python} code block into its real, executed output
 -- (`*-autoexec`), a Pyodide interactive editor, or plain highlighted source
 -- (`pdf-fallback`) -- depending on the current format and the cell's options.
 local function enablePyodideCodeCell(el)
+
+  local markedResult = enableMarkedPythonCodeCell(el)
+  if markedResult ~= nil then
+    return markedResult
+  end
 
   -- Not a Pyodide cell: leave untouched regardless of output format.
   if not isPyodideCell(el) then
@@ -1169,30 +1306,90 @@ local function enablePyodideCodeCell(el)
     return el
   end
 
-  -- We detected a Pyodide cell
-  missingPyodideCell = false
-
   -- Resolve the initial fold state against Quarto's own `code-fold`
   -- (document/project/profile), with the cell's own `#| code-fold:` taking
   -- precedence. Overwrites the raw option with the resolved "hide"/"show".
   cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
 
-  -- Modify the counter variable each time this is run to create
-  -- unique code cells
-  qPyodideCounter = qPyodideCounter + 1
+  -- Reserve a spot rather than numbering immediately -- see
+  -- reservePendingCell()'s own comment for why: this pass runs separately
+  -- from handleMarkedCellDiv()'s, so numbering here would put every
+  -- `{pyodide-python}` cell after every marked cell regardless of which
+  -- actually comes first on the page.
+  return reservePendingCell(cellCode, cellOptions)
+end
 
-  -- Create a new table for the CodeBlock
-  local codeBlockData = {
-    id = qPyodideCounter,
-    code = cellCode,
-    options = cellOptions
-  }
+-- The far more common case: Quarto's engine actually ran the marked cell,
+-- so it reaches this filter already wrapped as
+--   Div .cell
+--     CodeBlock python cell-code      <- source, marker line still in it
+--     Div .cell-output-display
+--       FloatRefTarget                <- real figure + caption
+-- with real output, a real caption and a real crossref anchor already
+-- built in -- none of which `*-autoexec` can ever produce (Quarto builds
+-- its crossref index before any extension filter runs, see README). Runs
+-- as its own pass, before the CodeBlock pass above, so that a marked
+-- CodeBlock found here is always removed/replaced before
+-- enableMarkedPythonCodeCell() ever gets a chance to see it -- that
+-- ordering is what tells the two cases apart, since a bare marked
+-- CodeBlock with no `.cell` wrapper (`execute: enabled: false`) never runs
+-- through here at all.
+local function handleMarkedCellDiv(el)
+  if not (el.attr and el.attr.classes:includes("cell")) then
+    return nil
+  end
 
-  -- Store the CodeDiv in the global table
-  table.insert(qPyodideCapturedCodeBlocks, codeBlockData)
+  local markerOptions, cellCode, codeIndex
+  for i, blk in ipairs(el.content) do
+    if blk.t == "CodeBlock" and blk.attr.classes:includes("python") then
+      local code, opts = extractPyodideMarker(blk.text)
+      if opts ~= nil then
+        markerOptions, cellCode, codeIndex = opts, code, i
+        break
+      end
+    end
+  end
+  if markerOptions == nil then
+    return nil
+  end
 
-  -- Return an insertion point inside the document
-  return pandoc.RawInline('html', qPyodideJSCellInsertionCode(qPyodideCounter))
+  -- Non-interactive formats (PDF, docx, ...): the engine already produced
+  -- the real output, crossrefs and all -- only the marker line itself has
+  -- to disappear from the displayed source.
+  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+    el.content[codeIndex] = pandoc.CodeBlock(cellCode, el.content[codeIndex].attr)
+    return el
+  end
+
+  local insertion = buildInteractiveCell(cellCode, markerOptions)
+
+  -- Keep Quarto's own figure float (and with it the caption and the
+  -- crossref anchor another chapter's `@fig-...` resolves to) but swap the
+  -- static image for the live interactive cell, and drop the
+  -- now-duplicated source and stdout that the engine also produced.
+  table.remove(el.content, codeIndex)
+
+  local placed = false
+  local rebuilt = el:walk({
+    Div = function(d)
+      if d.attr.classes:includes("cell-output-stdout") then
+        return {}
+      end
+      return d
+    end,
+    Plain = function(pl)
+      if not placed and #pl.content == 1 and pl.content[1].t == "Image" then
+        placed = true
+        return pandoc.Plain({ insertion })
+      end
+      return pl
+    end
+  })
+
+  if not placed then
+    table.insert(rebuilt.content, pandoc.Plain({ insertion }))
+  end
+  return rebuilt
 end
 
 local function stitchDocument(doc)
@@ -1217,7 +1414,20 @@ return {
     Pandoc = collectAndRunAutoexecCells
   },
   {
+    -- Runs as its own pass, strictly before the CodeBlock pass below: see
+    -- handleMarkedCellDiv()'s own comment for why the ordering (not just
+    -- the presence) of these two passes is what tells apart a marked cell
+    -- the engine actually ran from one it never did.
+    Div = handleMarkedCellDiv
+  },
+  {
     CodeBlock = enablePyodideCodeCell
+  },
+  {
+    -- Single pass, after both cell-producing passes above: assigns the
+    -- final, reading-order-correct id to every reserved cell regardless of
+    -- which pass reserved it. See reservePendingCell()'s comment.
+    Span = resolvePendingCells
   },
   {
     Pandoc = stitchDocument

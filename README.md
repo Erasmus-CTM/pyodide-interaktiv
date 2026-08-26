@@ -172,6 +172,43 @@ effort, so the hint won't appear. Text is fully localized
 
 ---
 
+## Marker cells: real Quarto crossrefs
+
+`{pyodide-python}`/`<format>-autoexec` figures can't be cross-referenced
+with `@fig-...` and come out as raster PNGs in PDF (see [Known
+limitations](#known-limitations)). For a real, numbered, linkable figure,
+write a normal `{python}` cell instead and opt it into HTML with a
+`# pyodide: ...` marker comment:
+
+````
+```{python}
+#| label: fig-parabola
+#| fig-cap: "The parabola $y=x^2$."
+# pyodide: autorun, read-only=false
+x = np.linspace(-2, 2, 200)
+plt.plot(x, x**2)
+plt.show()
+```
+````
+
+The marker takes the same options as the [cell options
+table](#cell-options-) (`autorun`, `read-only`, `code-fold`, ...) and is
+stripped from the shown source everywhere; `#| label:`/`#| fig-cap:` stay
+Quarto's own. PDF/docx/etc. keep Quarto's real, engine-produced figure
+untouched — only the marker line disappears. HTML swaps the computed
+output for the interactive editor but keeps Quarto's figure float, caption,
+and crossref anchor around it, so `@fig-parabola` from another page still
+resolves. Needs a real Python kernel at render time, same as any other
+`{python}` cell; with `execute: enabled: false` the marker still works but
+there's no real figure to keep either way.
+
+Prefer this over `<format>-autoexec` when the figure needs a working
+`@fig-...` reference or real vector PDF output; prefer `*-autoexec` for
+running an actual `{pyodide-python}` cell for real in a non-interactive
+format.
+
+---
+
 ## UI language
 
 Shipped languages: **English (`en`)**, **German (`de`)**, **Swedish (`sv`)**,
@@ -493,6 +530,17 @@ thread, since the runtime lives in the worker.
 - `<format>-autoexec` needs a `python3`/`python` interpreter on the machine
   that renders the document, and only reproduces stdout/the trailing
   expression's value, not matplotlib figures or other rich HTML output.
+- A [marker cell](#marker-cells-real-quarto-crossrefs) with `#| echo: false` stays
+  Quarto's plain static output instead of becoming interactive: Quarto's own engine
+  already omits the source from the AST before this filter ever sees the cell, so
+  there is no marker left to find. `#| include: false` behaves the same way (the
+  whole cell is gone before this filter runs) but that one is the actually intended
+  outcome either way.
+- A marker cell that raises with `#| error: true` can leak its own marker line into
+  the printed traceback in every format: Jupyter bakes the traceback's source-context
+  excerpt in at execution time, before this filter runs, so it still contains the
+  original line. Cosmetic only – the interactive editor in HTML still has a clean,
+  marker-free copy of the source next to it.
 
 ---
 

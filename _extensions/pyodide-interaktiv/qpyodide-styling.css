@@ -719,6 +719,23 @@ body.quarto-dark .qpyodide-input-echo {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Marker cells inside a Quarto figure float                              */
+
+/* A marker cell (`# pyodide: ...` on a real `{python}` cell) keeps Quarto's
+   own figure float around the interactive editor, so that the caption and
+   the crossref anchor survive. That float brings
+   `.quarto-figure-center>figure>div{text-align:center}` with it, which is
+   right for the static image it normally wraps but wrong for an editor:
+   text-align inherits, so the source lines, the toolbar and the fold
+   summary all end up centered. Realign the cell's own containers - the
+   rules further up that deliberately center plot output and buttons target
+   those elements directly and still win over this. */
+.qpyodide-interactive-area,
+.qpyodide-non-interactive-area {
+  text-align: start;
+}
+
+/* ---------------------------------------------------------------------- */
 /* RevealJS presentations                                                 */
 
 .reveal div.qpyodide-interactive-area {
