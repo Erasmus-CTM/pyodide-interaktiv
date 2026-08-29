@@ -818,3 +818,34 @@ body.quarto-dark .qpyodide-input-echo {
 .qpyodide-canvas-figure > div {
   margin-inline: auto;
 }
+
+/* WebAgg puts its controls and changing status message in one inline row.
+   Because plot output is centered, every change in that message (coordinates,
+   pan/zoom help, etc.) would re-center the whole row and make the buttons move.
+   Keep the controls in a fixed first row and reserve a second row for status. */
+.qpyodide-canvas-figure .mpl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.qpyodide-canvas-figure .mpl-toolbar .mpl-button-group,
+.qpyodide-canvas-figure .mpl-toolbar > select.mpl-widget {
+  flex: 0 0 auto;
+}
+
+.qpyodide-canvas-figure .mpl-toolbar .mpl-message {
+  display: block;
+  flex: 0 0 100%;
+  order: 100;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 1.5em;
+  padding-top: 0.2em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
