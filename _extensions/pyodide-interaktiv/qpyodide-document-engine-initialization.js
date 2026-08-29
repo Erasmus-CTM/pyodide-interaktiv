@@ -224,6 +224,8 @@ async function init(config) {
   postStatus(msg.workerLoading || "Loading Python (Pyodide) ...");
   pyodide = await mod.loadPyodide({
     indexURL: config.indexURL,
+    // Preserve the pre-0.28 JavaScript-null behaviour for existing lessons.
+    convertNullToNone: true,
     env: config.env,
     stdin: stdin,
     stdout: function(text) {

@@ -769,22 +769,6 @@ body.quarto-dark .qpyodide-input-echo {
   overflow: scroll;
 }
 
-/* Pan and zoom are toggles, but matplotlib renders no pressed state for
-   them: both buttons look identical whether the mode is on or off, so
-   nothing tells the reader whether dragging will move the plot or do
-   nothing at all. qpyodide-canvas-plots.js keeps this class in sync with
-   NavigationToolbar2.mode; colour it so the active tool is obvious.
-   The :hover twin is not redundant - matplotlib's own
-   `button.matplotlib-toolbar-button:hover` rule is injected into
-   <head> at runtime, i.e. after this file, and would otherwise win the
-   tie on equal specificity and hide the active state while hovering. */
-button.matplotlib-toolbar-button.qpyodide-toolbar-button-active,
-button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
-  color: #fff;
-  background: var(--bs-primary, #2780e3);
-  border-color: var(--bs-primary, #2780e3);
-}
-
 /* Interactive plots (canvas) --------------------------------------------
    The hint only shows while the second Pyodide instance is loading, or if
    the switchover fails. See qpyodide-canvas-plots.js. */
@@ -795,10 +779,8 @@ button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
   margin: 0.25rem 0 0.5rem 0;
 }
 
-/* Center plots. The canvas backend centers itself (it sets margin: 0 auto
-   on its container); for the PNG path and rich HTML output (animation,
-   Plotly, zeige_svg) there was previously no rule at all, so they were
-   left-aligned. */
+/* Center plots. For the PNG path and rich HTML output (animation, Plotly,
+   zeige_svg) there was previously no rule at all, so they were left-aligned. */
 .qpyodide-output-graph-area figure,
 .qpyodide-canvas-figure {
   margin-inline: auto;
@@ -822,17 +804,17 @@ button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
   margin-inline: auto;
 }
 
-/* Do NOT scale the canvas via CSS: mouse coordinates are recalculated via
-   getBoundingClientRect and stay correct, but a downscaled canvas becomes
-   blurry. Prefer horizontal scrolling instead. */
+/* WebAgg renders at the figure's requested pixel dimensions. Prefer
+   horizontal scrolling to CSS downscaling, which would make it blurry. */
 .qpyodide-canvas-figure {
   overflow-x: auto;
 }
 
-/* The backend creates a "window title" row per figure ("Figure 1",
-   "Figure 2", ...) - that's the window title of the original desktop GUI,
-   meaningless here. It has no CSS class of its own, only an ID ending in
-   "top" (see FigureCanvasWasm.show() in matplotlib-pyodide). */
-.qpyodide-canvas-figure div[id$="top"] {
+/* The browser does not need the desktop-style window title. */
+.qpyodide-canvas-figure .ui-dialog-titlebar {
   display: none;
+}
+
+.qpyodide-canvas-figure > div {
+  margin-inline: auto;
 }

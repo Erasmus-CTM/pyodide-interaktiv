@@ -140,7 +140,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
-  base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/
   build-variant: full
   show-startup-message: true
   feedback: true                 # show AI feedback buttons (default: true)
