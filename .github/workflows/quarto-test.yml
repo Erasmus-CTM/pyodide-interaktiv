@@ -3,6 +3,7 @@ name: Render standalone plot tests
 on:
   push:
     branches:
+      - main
       - issue-1-webagg
   pull_request:
 
