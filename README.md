@@ -38,6 +38,18 @@ Every cell offers **Run** (also Shift+Enter / Ctrl+Enter), **Reset**,
 **Copy**, **Feedback**, and **+ Code block** (appends an empty, editable
 extra editor — handy under read-only examples).
 
+### Matplotlib regression page
+
+[`plots_test.qmd`](plots_test.qmd) is a standalone regression page for the
+interactive Matplotlib path. It covers MathText and subplot titles, toolbar
+layout and navigation, the snap cursor, multiple figures from one cell, and
+the explicit `canvas: false` PNG fallback. With Quarto installed, render it
+directly from the repository root:
+
+```bash
+quarto render plots_test.qmd
+```
+
 ---
 
 ## AI Feedback
@@ -140,7 +152,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
-  base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/
   build-variant: full
   show-startup-message: true
   feedback: true                 # show AI feedback buttons (default: true)
