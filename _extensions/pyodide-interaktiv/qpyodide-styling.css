@@ -825,10 +825,12 @@ body.quarto-dark .qpyodide-input-echo {
    Keep the controls in a fixed first row and reserve a second row for status. */
 .qpyodide-canvas-figure .mpl-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
+  position: relative;
   box-sizing: border-box;
+  padding-bottom: 1.7em;
   text-align: left;
 }
 
@@ -839,8 +841,10 @@ body.quarto-dark .qpyodide-input-echo {
 
 .qpyodide-canvas-figure .mpl-toolbar .mpl-message {
   display: block;
-  flex: 0 0 100%;
-  order: 100;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   box-sizing: border-box;
   min-width: 0;
   height: 1.7em;
