@@ -6,7 +6,7 @@
 // by contrast, needs the browser DOM and therefore runs in a second Pyodide
 // instance on the main thread.
 //
-// This module's compromise (EXPERIMENT):
+// The interactive plot pipeline:
 //   1. The worker computes as before and additionally sends each open
 //      figure along as `pickle` bytes (Base64) with the PNG.
 //   2. The PNG is displayed immediately – the page therefore doesn't feel
@@ -53,7 +53,7 @@ globalThis.qpyodideCanvasPlots = {
   // "idle" | "booting" | "ready" | "failed"
   status: "idle",
 
-  // Measurements for the experiment (for evaluation in the console)
+  // Timing measurements for diagnostics in the browser console
   bootSeconds: null,
   renderSeconds: [],
 
