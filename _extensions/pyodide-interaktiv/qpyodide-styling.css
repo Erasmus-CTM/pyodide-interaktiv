@@ -843,7 +843,8 @@ body.quarto-dark .qpyodide-input-echo {
   order: 100;
   box-sizing: border-box;
   min-width: 0;
-  min-height: 1.5em;
+  height: 1.7em;
+  min-height: 1.7em;
   padding-top: 0.2em;
   overflow: hidden;
   white-space: nowrap;
