@@ -617,3 +617,15 @@ review mode. `npm ci && npm test` runs adapter and execution-boundary regression
 Refresh the generated fallback with `python scripts/sync-ai-feedback.py PATH_TO_AI_FEEDBACK`.
 The workbench in `Erasmus-CTM/ai-feedback` pins this feature branch before any
 consumer migration PR.
+
+## Configurable shared teaching policies
+
+With ai-feedback 0.4.0, use `ai-feedback.policy-files` in Quarto metadata to
+load one YAML file or an ordered list. Each file defines `ai-feedback.defaults`
+and/or `ai-feedback.integrations` with this integration’s name. Configure `prompt`,
+`steps`, `language`, `max-words`, `max-issues`, `allow-full-solution` and
+`reset-on-run`. Later step lists replace earlier lists; `steps: []` selects review
+mode. Run/Check resets progression by default; set `reset-on-run: false` to keep it.
+Explicit Reset always restarts at step one.
+
+See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/feedback-policies.md).

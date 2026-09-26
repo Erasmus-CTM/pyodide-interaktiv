@@ -284,6 +284,7 @@ local function resolveLang(meta)
 end
 
 local function setPyodideInitializationOptions(meta)
+  if quarto.doc.is_format("html") then dofile(quarto.utils.resolve_path("ai-feedback/feedback-policy.lua")).emit(meta) end
 
   -- Resolve the language first: it must also work for documents that have no
   -- `pyodide:` block at all, so this happens before the early return below.
@@ -576,7 +577,7 @@ local function ensurePyodideSetup()
 
   if feedbackEnabled ~= "false" then
     quarto.doc.add_html_dependency({
-      name = "ai-feedback", version = "0.3.0",
+      name = "ai-feedback", version = "0.4.0",
       scripts = {"ai-feedback/feedback-core.js", "ai-feedback/feedback-dom.js", "ai-feedback/ai-feedback.js"},
       stylesheets = {"ai-feedback/ai-feedback.css"}
     })

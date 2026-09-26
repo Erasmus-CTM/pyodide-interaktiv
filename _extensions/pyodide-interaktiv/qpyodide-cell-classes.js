@@ -476,6 +476,7 @@ class EditorUnit {
     };
 
     this.resetButton.onclick = () => {
+      thiz.feedbackHandle?.reset();
       thiz.invalidateFeedback();
       if (thiz.editor) {
         thiz.editor.setValue(thiz.editor.__qpyodideinitialCode);
@@ -589,6 +590,7 @@ class EditorUnit {
    */
   async runCode(code) {
     if (qpyodideExecutionBusy) return "";
+    this.feedbackHandle?.reset('run');
     this.invalidateFeedback();
     const revision = this.feedbackRevision;
     const outputRevision = this.outputRevision;

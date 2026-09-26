@@ -39,7 +39,7 @@ test('Feedback before Run never executes, shares settings and retains three no-s
   assert.equal(u.runButton.disabled,true); assert.equal(u.feedbackButton.disabled,false);
   for(let level=1;level<=4;level++) {
     const text=await prompt(u);
-    assert.ok(text.includes(w.QP_L.hintInstructions[Math.min(level,3)]));
+    assert.ok(text.includes(F.shippedPolicies.integrations['pyodide-interaktiv'].steps[Math.min(level,3)-1].prompt));
     assert.match(text,/"evidence":\[\]/); assert.match(text,/Do not supply a complete/);
   }
   assert.equal(runs(),0); assert.equal(F.loadConfig().storage,'session');
@@ -79,7 +79,7 @@ test('new Run quietly cancels pending feedback, even with unchanged code',async(
   const {w,F,unit}=page();const u=unit();let finish;
   F.createClient=()=>({request:()=>new Promise(resolve=>{finish=resolve;})});F.saveConfig({mode:'api',storage:'session'});
   const pending=u.feedbackHandle.request();await tick();await u.runCode(u.getCode());finish({text:'STALE',format:'markdown'});await pending;
-  assert.equal(u.outputFeedbackDiv.textContent,'');assert.equal(w.sessionStorage.getItem('ai-feedback-hints|/examples.html|pyodide-1'),null);w.close();
+  assert.equal(u.outputFeedbackDiv.textContent,'');assert.equal(w.sessionStorage.getItem('ai-feedback-hints-v2|/examples.html|pyodide-1'),null);w.close();
 });
 test('different editors have independent evidence; readonly/disabled cells have no Feedback',async()=>{
   const {w,unit}=page();const first=unit(),second=unit();await first.runCode(first.getCode());assert.equal(evidence(first).length,2);assert.deepEqual(evidence(second),[]);
@@ -87,11 +87,20 @@ test('different editors have independent evidence; readonly/disabled cells have 
   const disabled=page({enabled:false});assert.equal(disabled.unit().feedbackButton,null);disabled.w.close();
 });
 test('older runtime disables Feedback without disabling Run',()=>{
-  const {w,F,unit}=page();F.version='0.2.1';const u=unit();assert.equal(u.feedbackButton.disabled,true);assert.equal(u.runButton.disabled,false);assert.match(u.outputFeedbackDiv.textContent,/0.3.0/);w.close();
+  const {w,F,unit}=page();F.version='0.2.1';const u=unit();assert.equal(u.feedbackButton.disabled,true);assert.equal(u.runButton.disabled,false);assert.match(u.outputFeedbackDiv.textContent,/0.4.0/);w.close();
 });
 for(const language of ['en','de','sv','no','da','nb'])test('localized tutor policy survives: '+language,async()=>{
-  const {w,unit}=page({language});const u=unit();const text=await prompt(u);assert.ok(text.includes(w.QP_L.systemPrompt));assert.ok(text.includes(w.QP_L.hintInstructions[1]));w.close();
+  const {w,unit}=page({language});const u=unit();const text=await prompt(u);assert.ok(text.includes(w.AIFeedback.shippedPolicies.integrations['pyodide-interaktiv'].prompt));assert.match(text,new RegExp('Write explanations in '+(language==='no'?'nb':language))); w.close();
 });
 test('review mode has no hint counter and explicit shared defaults take precedence',async()=>{
   const {w,F,unit}=page({hints:false});w.__aiFeedbackConfig={storage:'local'};const u=unit();await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint'),null);assert.equal(F.loadConfig().storage,'local');w.close();
+});
+
+test('Run resets hint progression unless the integration policy opts out',async()=>{
+ const {w,unit}=page();const u=unit();await prompt(u);await prompt(u);
+ assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 2');
+ await u.runCode(u.getCode());await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 1');
+ w.__aiFeedbackPolicies={layers:[{integrations:{'pyodide-interaktiv':{'reset-on-run':false}}}]};
+ await prompt(u);await u.runCode(u.getCode());await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 2');
+ u.resetButton.click();await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 1');w.close();
 });
