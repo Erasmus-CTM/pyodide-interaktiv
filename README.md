@@ -619,7 +619,7 @@ review mode. `npm ci && npm test` runs adapter and execution-boundary regression
 Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
 when running consumer tests. For this preview install
 `Erasmus-CTM/ai-feedback@feature/shared-context` (0.5.0).
-The workbench in `Erasmus-CTM/ai-feedback` pins this feature branch before any
+The workbench in `Erasmus-CTM/ctm-assessment` pins this feature branch before any
 consumer migration PR.
 
 ## Configurable shared teaching policies
