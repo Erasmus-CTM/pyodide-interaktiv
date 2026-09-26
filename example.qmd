@@ -1,5 +1,5 @@
 ---
-title: "pyodide-interaktiv example"
+title: "Predict, run, explain"
 format: html
 filters: [_filters/example-source.lua, pyodide-interaktiv]
 ai-feedback:
@@ -7,6 +7,13 @@ ai-feedback:
 pyodide:
   feedback: true
 ---
+
+What will this program print? Make a prediction before you run it, then fix the
+loop. Open the source to adapt the task to a calculation from your own subject.
+
+**Feedback** prepares a message to paste into an AI chat. If your course has
+feedback set up on the page, you can receive the reply here instead.
+
 
 ## Print a total
 
