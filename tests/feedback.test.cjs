@@ -9,7 +9,7 @@ function page({language='en', storage='session', hints=true, enabled=true} = {})
   const dom = new JSDOM('<main></main>', {url:'https://course.invalid/examples.html', runScripts:'outside-only'});
   const w = dom.window;
   w.AbortController = AbortController;
-  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(ext,'ai-feedback',file),'utf8'));
+  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(process.env.AI_FEEDBACK_EXTENSION,file),'utf8'));
   w.qpyodideLang = language;
   w.qpyodideFeedbackOptions = {enabled,hints,storage};
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-locales.js'),'utf8'));
@@ -87,7 +87,7 @@ test('different editors have independent evidence; readonly/disabled cells have 
   const disabled=page({enabled:false});assert.equal(disabled.unit().feedbackButton,null);disabled.w.close();
 });
 test('older runtime disables Feedback without disabling Run',()=>{
-  const {w,F,unit}=page();F.version='0.2.1';const u=unit();assert.equal(u.feedbackButton.disabled,true);assert.equal(u.runButton.disabled,false);assert.match(u.outputFeedbackDiv.textContent,/0.4.0/);w.close();
+  const {w,F,unit}=page();F.version='0.2.1';const u=unit();assert.equal(u.feedbackButton.disabled,true);assert.equal(u.runButton.disabled,false);assert.match(u.outputFeedbackDiv.textContent,/0.5.0/);w.close();
 });
 for(const language of ['en','de','sv','no','da','nb'])test('localized tutor policy survives: '+language,async()=>{
   const {w,unit}=page({language});const u=unit();const text=await prompt(u);assert.ok(text.includes(w.AIFeedback.shippedPolicies.integrations['pyodide-interaktiv'].prompt));assert.match(text,new RegExp('Write explanations in '+(language==='no'?'nb':language))); w.close();

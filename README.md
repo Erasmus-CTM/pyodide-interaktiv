@@ -588,17 +588,19 @@ licensed under the
 
 ## Shared AI feedback (integration branch)
 
-Feedback uses the bundled `ai-feedback` 0.3.0 runtime, or the identical explicit
-Quarto extension when installed. Existing documents need no extra filter. The
+Install `ai-feedback` once in the project. The Pyodide filter loads it automatically;
+no shared runtime is bundled here. Existing filter lists need no extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
 import in that dialog. `pyodide: feedback-storage: session` remains the default
 storage choice unless explicit shared configuration or saved settings override it.
 
 Supply `#| task: ...` for the assignment and optionally
-`#| feedback-context: context-id` for explicitly selected prose. The execution
-`context` option still means `interactive`, `setup`, or `output`; it is separate
-from feedback context. With no task, feedback reviews the code without inventing
+`#| feedback-context: context-id` for explicitly selected prose. Omitted feedback
+context collects preceding section prose. `context: none` opts out; `context: id`
+selects the same reusable `.ai-context` blocks as the other integrations.
+`context: interactive/setup/output` keeps its execution meaning; use the
+`feedback-context` alias when configuring both. With no task, feedback reviews the code without inventing
 an assignment. Three hints retain the original tutor policy: even the last hint
 explains the approach in words without supplying finished code.
 
@@ -609,12 +611,14 @@ pending feedback. Selected-line runs provide no evidence for a different full
 editor. Run, Stop, input, plots, setup/output, autorun, readonly and additional
 editors keep their execution behavior.
 
-The tutor policy remains localized in English, German, Swedish, Norwegian and
-Danish (`nb` is a Norwegian alias). Shared settings support English, German and
+Feedback follows the selected English, German, Swedish, Norwegian or Danish
+language (`nb` is a Norwegian alias); teaching instructions live in shared YAML. Shared settings support English, German and
 Norwegian for these locales; Swedish and Danish use English shared controls.
 `feedback: false` removes the feedback dependency; `feedback-hints: false` uses
 review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
-Refresh the generated fallback with `python scripts/sync-ai-feedback.py PATH_TO_AI_FEEDBACK`.
+Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
+when running consumer tests. For this preview install
+`Erasmus-CTM/ai-feedback@feature/layered-feedback` (0.5.0).
 The workbench in `Erasmus-CTM/ai-feedback` pins this feature branch before any
 consumer migration PR.
 

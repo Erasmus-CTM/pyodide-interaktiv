@@ -1,3 +1,4 @@
+local feedback = nil
 ----
 --- qpyodide.lua – Pandoc Lua filter of the `pyodide-interaktiv` extension
 ---
@@ -153,7 +154,7 @@ local qPyodideDefaultCellOptions = {
   -- (including ""), so leaving it unset here changes nothing observable.
   ["context"] = "",
   ["task"] = "",
-  ["feedback-context"] = "none",
+  ["feedback-context"] = "",
   ["warning"] = "true",
   ["message"] = "true",
   ["results"] = "markup",
@@ -284,7 +285,6 @@ local function resolveLang(meta)
 end
 
 local function setPyodideInitializationOptions(meta)
-  if quarto.doc.is_format("html") then dofile(quarto.utils.resolve_path("ai-feedback/feedback-policy.lua")).emit(meta) end
 
   -- Resolve the language first: it must also work for documents that have no
   -- `pyodide:` block at all, so this happens before the early return below.
@@ -575,13 +575,6 @@ local function ensurePyodideSetup()
   -- Insert JS routine to add document status header
   includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
 
-  if feedbackEnabled ~= "false" then
-    quarto.doc.add_html_dependency({
-      name = "ai-feedback", version = "0.4.0",
-      scripts = {"ai-feedback/feedback-core.js", "ai-feedback/feedback-dom.js", "ai-feedback/ai-feedback.js"},
-      stylesheets = {"ai-feedback/ai-feedback.css"}
-    })
-  end
 
   -- Insert the AI feedback module (settings UI + API client); it deactivates
   -- itself when `pyodide: feedback: false` is set in the document metadata.
@@ -752,6 +745,8 @@ local function extractCodeBlockOptions(block)
     end
   end
 
+  if feedback then cellOptions["feedbackContext"] = feedback.context(block, cellOptions, true) end
+  if cellOptions.context and cellOptions.context ~= "setup" and cellOptions.context ~= "output" and cellOptions.context ~= "interactive" then cellOptions.context = "" end
   -- Merge cell options with default options
   cellOptions = mergeCellOptions(cellOptions)
 
@@ -1417,6 +1412,7 @@ local function enableMarkedPythonCodeCell(el)
     return pandoc.CodeBlock(cellCode, el.attr)
   end
 
+  if feedback then markerOptions.feedbackContext = feedback.context(el, markerOptions, true) end
   return buildInteractiveCell(cellCode, markerOptions)
 end
 
@@ -1629,6 +1625,7 @@ local function handleMarkedCellDiv(el)
     return el
   end
 
+  if feedback then markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
   local insertion = buildInteractiveCell(cellCode, markerOptions)
 
   -- Keep Quarto's own figure float (and with it the caption and the
@@ -1678,6 +1675,20 @@ return {
   {
     Meta = setPyodideInitializationOptions
   },
+  { Callout = function(c)
+      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
+        feedback = feedback or dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+        return feedback.markCallout(c)
+      end
+      return c
+    end },
+  { Pandoc = function(doc)
+      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
+        feedback = dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+        return feedback.prepare(doc)
+      end
+      return doc
+    end },
   {
     Pandoc = collectAndRunAutoexecCells
   },

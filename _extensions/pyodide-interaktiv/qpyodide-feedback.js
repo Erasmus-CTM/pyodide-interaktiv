@@ -16,9 +16,9 @@
       const output = unit.feedbackDiv;
       output.classList.add('ai-feedback-output');
       output.setAttribute('aria-live', 'polite');
-      if (!version || !(version[0] > 0 || version[1] >= 4)) {
+      if (!version || !(version[0] > 0 || version[1] >= 5)) {
         unit.feedbackButton.disabled = true;
-        output.textContent = 'Pyodide feedback requires ai-feedback 0.4.0 or later. Update the installed extension and render again. Run remains available.';
+        output.textContent = 'Pyodide feedback requires ai-feedback 0.5.0 or later. Update the installed extension and render again. Run remains available.';
         return null;
       }
       unit.feedbackButton.disabled = false; // Feedback needs no Python runtime.
@@ -29,9 +29,10 @@
         uiLanguage,
         getRequest() {
           const code = unit.getCode();
-          const refs = unit.options?.['feedback-context'];
-          const materials = refs && refs !== 'none'
-            ? F.collectExplicitContexts(refs).map(ctx => ({id: ctx.id, role: 'context', text: ctx.content})) : [];
+          const materials = F.contextMaterials(unit.options?.feedbackContext || {
+            mode: unit.options?.['feedback-context'] === 'none' ? 'none' : unit.options?.['feedback-context'] ? 'explicit' : 'auto',
+            refs: unit.options?.['feedback-context'] || ''
+          });
           return {profile: 'python',
             task: unit.options?.task || 'Review the learner’s current Python program against its visible code and comments. No separate assignment was supplied; do not invent requirements.',
             materials, responses: [{id: 'code', format: 'code', language: 'python', value: code}],
