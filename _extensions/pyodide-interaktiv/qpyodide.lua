@@ -1626,6 +1626,18 @@ local function handleMarkedCellDiv(el)
     return el
   end
 
+  -- Quarto moves an authored label onto a single display output and gives
+  -- its wrapper the generated ID cell-<label>. Recover that output ID;
+  -- do not strip cell- from genuine authored wrapper labels.
+  if not markerOptions.label or markerOptions.label == "" then
+    local candidate = (el.identifier or ""):match("^cell%-(.+)$")
+    if candidate then
+      local function recover(output)
+        if output.identifier == candidate or (output.attributes and output.attributes["data-ctm-feedback-output-id"] == candidate) then markerOptions.label = candidate end
+      end
+      el:walk({Div=recover, Figure=recover, Image=recover, Span=recover})
+    end
+  end
   if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
   local insertion = buildInteractiveCell(cellCode, markerOptions)
 
@@ -1693,6 +1705,12 @@ return {
   {
     Pandoc = collectAndRunAutoexecCells
   },
+  { FloatRefTarget = function(target, scaffold)
+      if target.identifier and target.identifier ~= "" then
+        scaffold.attributes["data-ctm-feedback-output-id"] = target.identifier
+        return scaffold
+      end
+    end },
   {
     -- Runs as its own pass, strictly before the CodeBlock pass below: see
     -- handleMarkedCellDiv()'s own comment for why the ordering (not just
