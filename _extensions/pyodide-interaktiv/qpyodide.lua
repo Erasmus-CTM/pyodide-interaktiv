@@ -152,6 +152,8 @@ local qPyodideDefaultCellOptions = {
   -- switch already falls back to InteractiveCell for anything else
   -- (including ""), so leaving it unset here changes nothing observable.
   ["context"] = "",
+  ["task"] = "",
+  ["feedback-context"] = "none",
   ["warning"] = "true",
   ["message"] = "true",
   ["results"] = "markup",
@@ -571,6 +573,14 @@ local function ensurePyodideSetup()
 
   -- Insert JS routine to add document status header
   includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
+
+  if feedbackEnabled ~= "false" then
+    quarto.doc.add_html_dependency({
+      name = "ai-feedback", version = "0.3.0",
+      scripts = {"ai-feedback/feedback-core.js", "ai-feedback/feedback-dom.js", "ai-feedback/ai-feedback.js"},
+      stylesheets = {"ai-feedback/ai-feedback.css"}
+    })
+  end
 
   -- Insert the AI feedback module (settings UI + API client); it deactivates
   -- itself when `pyodide: feedback: false` is set in the document metadata.

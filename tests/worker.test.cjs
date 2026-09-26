@@ -1,0 +1,21 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+test('worker serializes other consumers around document output capture and survives errors',async()=>{
+  const file=fs.readFileSync(path.join(__dirname,'../_extensions/pyodide-interaktiv/qpyodide-document-engine-initialization.js'),'utf8');
+  const source=file.split('const qpyodideWorkerSource = String.raw`')[1].split('\n`;')[0];
+  let release;const messages=[];
+  const ctx=vm.createContext({self:{postMessage:msg=>messages.push(structuredClone(msg))}});
+  vm.runInContext(source,ctx);
+  ctx.load=()=>new Promise(resolve=>{release=resolve;});
+  vm.runInContext(`pyodide={loadPackagesFromImports:()=>load(),runPythonAsync:async code=>{if(code==='FAIL')throw new Error('fail');runEntries.push({type:'stdout',message:code});},globals:{get:()=>{const collect=()=>({toJs:()=>[[],[],[],[],[]],destroy(){}});collect.destroy=()=>{};return collect;}}};`,ctx);
+  const first=ctx.self.onmessage({data:{id:1,type:'runCell',code:'LEARNER_OUTPUT'}});
+  await new Promise(resolve=>setImmediate(resolve));
+  const other=ctx.self.onmessage({data:{id:2,type:'runPython',code:'HIDDEN_TEST_OUTPUT'}});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(messages.length,0);
+  await ctx.self.onmessage({data:{id:3,type:'setInputBuffers',inputStatusBuf:null,inputDataBuf:null}});
+  assert.equal(messages[0].id,3,'control message must bypass a pending computation');
+  release();await Promise.all([first,other]);
+  assert.deepEqual(messages.find(m=>m.id===1).value.entries,[{type:'stdout',message:'LEARNER_OUTPUT'}]);
+  await ctx.self.onmessage({data:{id:4,type:'runPython',code:'FAIL'}});
+  await ctx.self.onmessage({data:{id:5,type:'runPython',code:'AFTER_FAILURE'}});
+  assert.equal(messages.find(m=>m.id===4).type,'error');assert.equal(messages.find(m=>m.id===5).type,'result');
+});

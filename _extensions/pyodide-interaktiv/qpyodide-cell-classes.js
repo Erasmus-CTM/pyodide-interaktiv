@@ -244,7 +244,11 @@ class EditorUnit {
     this.editor = null;
     this.isReadOnly = options["read-only"] === "true";
     this.lastRunCode = null;   // code state of the last run
-    this.lastOutput = null;    // text output of the last run (for the feedback cache)
+    this.lastOutput = null;    // retained execution result for existing callers
+    this.feedbackRevision = 0;
+    this.outputRevision = 0;
+    this.feedbackEvidence = null;
+    this.feedbackHandle = null;
 
     this.buildDom();
     this.initMonaco();
@@ -319,7 +323,7 @@ class EditorUnit {
       this.feedbackButton.id = `qpyodide-button-feedback-${uid}`;
       this.feedbackButton.title = QP_L.feedbackTitle;
       this.feedbackButton.innerHTML = QP_L.feedbackLabel;
-      this.feedbackButton.disabled = !globalThis.mainPyodide;
+      this.feedbackButton.disabled = false;
       rightButtonsDiv.appendChild(this.feedbackButton);
     }
 
@@ -455,7 +459,7 @@ class EditorUnit {
       thiz.editor.onDidFocusEditorText(addPyodideKeyboardShortCutCommands);
       thiz.editor.onDidContentSizeChange(updateHeight);
       // Code changes can add/remove input() -> re-evaluate the gate
-      thiz.editor.onDidChangeModelContent(() => thiz.updateInputGate());
+      thiz.editor.onDidChangeModelContent(() => { thiz.invalidateFeedback({preserveRunOutput: true}); thiz.updateInputGate(); });
       updateHeight();
       thiz.updateInputGate();
     });
@@ -472,6 +476,7 @@ class EditorUnit {
     };
 
     this.resetButton.onclick = () => {
+      thiz.invalidateFeedback();
       if (thiz.editor) {
         thiz.editor.setValue(thiz.editor.__qpyodideinitialCode);
       }
@@ -487,21 +492,39 @@ class EditorUnit {
 
     // AI feedback: all of its logic lives in qpyodide-feedback.js
     if (this.feedbackButton) {
-      qpyodideFeedback.attach({
+      this.feedbackHandle = qpyodideFeedback.attach({
         uid: this.uid,
         feedbackButton: this.feedbackButton,
         feedbackDiv: this.outputFeedbackDiv,
         getCode: () => thiz.getCode(),
-        runForOutput: () => thiz.runForOutput()
+        options: this.options,
+        getEvidence: () => thiz.getFeedbackEvidence(),
+        getRevision: () => thiz.feedbackRevision
       });
     }
 
     // Keep the input() gate current: on state changes (input() checked/enabled)
     // and once as soon as the Pyodide runtime is ready.
+    window.addEventListener("qpyodide-runtime-restart", () => thiz.invalidateFeedback({preserveRunOutput: true}));
     window.addEventListener("qpyodide-input-state", () => thiz.updateInputGate());
     if (globalThis.qpyodideReady) {
       globalThis.qpyodideReady.then(() => thiz.updateInputGate()).catch(() => {});
     }
+  }
+
+  invalidateFeedback({preserveRunOutput = false} = {}) {
+    this.feedbackRevision++;
+    if (!preserveRunOutput) this.outputRevision++;
+    this.lastRunCode = null;
+    this.lastOutput = null;
+    this.feedbackEvidence = null;
+    this.feedbackHandle?.cancel({clearOutput: true});
+  }
+
+  getFeedbackEvidence() {
+    const cached = this.feedbackEvidence;
+    return cached && cached.revision === this.feedbackRevision && cached.code === this.getCode()
+      ? cached.evidence.map(item => ({...item})) : [];
   }
 
   /** Gets the editor's current code (fallback: initial code). */
@@ -566,6 +589,10 @@ class EditorUnit {
    */
   async runCode(code) {
     if (qpyodideExecutionBusy) return "";
+    this.invalidateFeedback();
+    const revision = this.feedbackRevision;
+    const outputRevision = this.outputRevision;
+    let evidence = [];
     qpyodideExecutionBusy = true;
     qpyodideSetRunButtonsEnabled(false);
 
@@ -657,6 +684,11 @@ class EditorUnit {
         code, globalThis.qpyodideCanvasWanted?.(this.options)
       );
       text = result.text;
+      if (outputRevision !== this.outputRevision) return text;
+      const stdout = result.entries.filter(entry => entry.type === 'stdout').map(entry => entry.message).join('\n');
+      const hasError = result.entries.some(entry => entry.type === 'stderr');
+      evidence = [{label: 'Prior execution', text: hasError ? 'The run reported an error. Raw error details are omitted.' : 'The run completed.'}];
+      if (stdout) evidence.push({label: 'Learner stdout', text: stdout.length > 8000 ? stdout.slice(0, 8000) + '\n[Output truncated]' : stdout});
 
       // Append HTML return value (e.g. animation) and graphics
       if (result.html) qpyodideRenderHtmlOutput(this.outputCodeDiv, result.html);
@@ -669,6 +701,8 @@ class EditorUnit {
       }
     } catch (err) {
       // Hard abort (worker restart) or worker crash
+      evidence = [];
+      if (outputRevision !== this.outputRevision) return '';
       text = String((err && err.message) || err);
       terminalDiv.querySelectorAll(".qpyodide-input-row").forEach((r) => r.remove());
       const errCode = document.createElement("code");
@@ -685,8 +719,11 @@ class EditorUnit {
       qpyodideExecutionBusy = false;
       qpyodideSetRunButtonsEnabled(true);
     }
-    this.lastRunCode = code;
-    this.lastOutput  = text;
+    if (revision === this.feedbackRevision && code === this.getCode()) {
+      this.lastRunCode = code;
+      this.lastOutput = text;
+      this.feedbackEvidence = {code, revision, evidence};
+    }
     return text;
   }
 

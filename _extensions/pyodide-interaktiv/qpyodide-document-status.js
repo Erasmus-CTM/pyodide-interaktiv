@@ -101,9 +101,7 @@ globalThis.qpyodideSetInteractiveButtonState = function(buttonText, enableCodeBu
     btn.disabled = !enableCodeButton ||
       (btn.dataset.needsInput === "1" && !globalThis.qpyodideInputAvailable());
   });
-  document.querySelectorAll(".qpyodide-button-feedback").forEach((btn) => {
-    btn.disabled = !enableCodeButton;
-  });
+  // Feedback and its cancellation lifecycle are independent of Python startup.
 }
 
 // Update the status message in non-interactive (output/setup) cells

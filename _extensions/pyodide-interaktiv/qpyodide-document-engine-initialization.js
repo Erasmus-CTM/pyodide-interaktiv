@@ -340,8 +340,7 @@ async function runPythonRaw(code) {
   return result;
 }
 
-self.onmessage = async function(event) {
-  const msg = event.data;
+async function handleMessage(msg) {
   try {
     let value = true;
     switch (msg.type) {
@@ -377,6 +376,20 @@ self.onmessage = async function(event) {
   } catch (err) {
     self.postMessage({ type: "error", id: msg.id, message: String((err && err.message) || err) });
   }
+}
+
+// Python has one interpreter and one output capture. Serialize mutations so a
+// checker from another extension cannot enter a document cell's stdout evidence.
+// Input/interrupt buffers are control messages, independent of this queue.
+let commandQueue = Promise.resolve();
+self.onmessage = function(event) {
+  const msg = event.data;
+  if (msg.type === "setInterrupt" || msg.type === "setInputBuffers") {
+    return handleMessage(msg);
+  }
+  const pending = commandQueue.then(() => handleMessage(msg));
+  commandQueue = pending.catch(() => {});
+  return pending;
 };
 `;
 
@@ -474,6 +487,7 @@ function qpyodideBootPyodideWorker() {
      * boot a fresh runtime (startup cells run again).
      */
     restart(reason) {
+      window.dispatchEvent(new Event("qpyodide-runtime-restart"));
       worker.terminate();
       const error = new Error(reason || "Python was restarted.");
       for (const entry of pending.values()) entry.reject(error);

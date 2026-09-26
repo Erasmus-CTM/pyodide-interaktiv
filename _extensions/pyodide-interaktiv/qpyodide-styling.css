@@ -152,145 +152,13 @@ fieldset:disabled .qpyodide-button {
 /* ---------------------------------------------------------------------- */
 /* AI feedback                                                            */
 
-.qpyodide-output-feedback-area.has-content {
+.qpyodide-output-feedback-area:not(:empty) {
   background-color: var(--bs-warning-bg-subtle, #ffe9d6);
   color: var(--bs-body-color, #000);
   border: 1px solid var(--bs-border-color, #e0c5a8);
   border-radius: 0.25rem;
   padding: 10px;
   margin-top: 0.5rem;
-}
-
-.qpyodide-feedback-header {
-  font-weight: 600;
-  text-decoration: underline;
-  margin-bottom: 0.75rem;
-}
-
-.qpyodide-feedback-body code {
-  background-color: var(--bs-tertiary-bg, #f4f4f4);
-}
-
-.qpyodide-feedback-code {
-  white-space: pre-wrap;
-  background-color: var(--bs-tertiary-bg, #f4f4f4);
-  color: var(--bs-body-color, #222);
-  border: 1px solid var(--bs-border-color, #ccc);
-  border-radius: 4px;
-  padding: 10px;
-  font-size: 0.85em;
-  margin: 6px 0;
-  max-height: 300px;
-  overflow: auto;
-}
-
-.qpyodide-feedback-error {
-  color: var(--bs-danger, #db4133);
-}
-
-.qpyodide-feedback-error-gear {
-  display: block;
-  margin-top: 0.5rem;
-}
-
-/* ---------------------------------------------------------------------- */
-/* Settings panel (set up AI feedback)                                    */
-
-#qpyodide-status-message-area {
-  grid-column: 1 / -1;
-}
-
-#qpyodide-feedback-settings {
-  margin-top: 0.5rem;
-}
-
-.qpyodide-feedback-settings-status {
-  margin-left: 0.5rem;
-  color: var(--bs-success, #198754);
-  font-size: 0.85rem;
-}
-
-.qpyodide-feedback-panel {
-  margin-top: 0.5rem;
-  padding: 12px;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  background-color: var(--bs-tertiary-bg, #f8f9fa);
-  border: 1px solid var(--bs-border-color, #dee2e6);
-  border-radius: 0.5rem;
-}
-
-.qpyodide-feedback-field {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.qpyodide-feedback-field > span {
-  flex: 0 0 130px;
-  font-size: 0.9rem;
-}
-
-.qpyodide-feedback-panel input:not([type="checkbox"]),
-.qpyodide-feedback-panel select {
-  padding: 0.25rem 0.5rem;
-  background-color: var(--bs-body-bg, #fff);
-  color: var(--bs-body-color, #000);
-  border: 1px solid var(--bs-border-color, #ced4da);
-  border-radius: 0.25rem;
-}
-
-.qpyodide-feedback-field > input,
-.qpyodide-feedback-field > select,
-.qpyodide-feedback-field > .qpyodide-feedback-inputrow {
-  flex: 1;
-}
-
-/* Input + button side by side (e.g. model field + "Fetch models") */
-.qpyodide-feedback-inputrow {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.qpyodide-feedback-inputrow > input {
-  flex: 1;
-}
-
-/* Fetched model list */
-.qpyodide-feedback-modellist {
-  margin: 0 0 0.5rem 138px;
-  font-size: 0.85rem;
-}
-
-.qpyodide-feedback-modellist-info {
-  margin-bottom: 0.25rem;
-}
-
-.qpyodide-feedback-modellist label {
-  display: block;
-  margin-bottom: 0.25rem;
-}
-
-.qpyodide-feedback-modellist select {
-  width: 100%;
-}
-
-.qpyodide-feedback-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.qpyodide-feedback-help {
-  margin-top: 0.75rem;
-  padding: 12px;
-  background-color: var(--bs-primary-bg-subtle, #f4f8ff);
-  border: 1px solid var(--bs-border-color, #cdddf5);
-  border-radius: 6px;
-  font-size: 0.85em;
-  line-height: 1.5;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -477,7 +345,7 @@ body.quarto-dark .qpyodide-output-graph-area.has-content {
   border-color: var(--bs-border-color, #495057);
 }
 
-body.quarto-dark .qpyodide-output-feedback-area.has-content {
+body.quarto-dark .qpyodide-output-feedback-area:not(:empty) {
   background-color: var(--bs-warning-bg-subtle, #2d2000);
   border-color: var(--bs-warning-border-subtle, #6c5000);
   color: var(--bs-body-color, #dee2e6);
@@ -565,7 +433,7 @@ body.quarto-dark .qpyodide-feedback-help {
   body:not(.quarto-light) .qpyodide-output-graph-area.has-content {
     border-color: var(--bs-border-color, #495057);
   }
-  body:not(.quarto-light) .qpyodide-output-feedback-area.has-content {
+  body:not(.quarto-light) .qpyodide-output-feedback-area:not(:empty) {
     background-color: var(--bs-warning-bg-subtle, #2d2000);
     border-color: var(--bs-warning-border-subtle, #6c5000);
     color: var(--bs-body-color, #dee2e6);
@@ -836,3 +704,13 @@ button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
 .qpyodide-canvas-figure div[id$="top"] {
   display: none;
 }
+
+.qpyodide-editor-toolbar .qpyodide-feedback-gear {
+  margin: 0;
+  padding: .375rem .75rem;
+  font-size: inherit;
+  line-height: 1.5;
+}
+
+/* Runtime status spans the complete header grid. */
+#qpyodide-status-message-area { grid-column: 1 / -1; }

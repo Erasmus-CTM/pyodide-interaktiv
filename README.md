@@ -42,76 +42,30 @@ extra editor — handy under read-only examples).
 
 ## AI Feedback
 
-### Quick start for beginners
+### Getting feedback
 
-**Without an API key** (simplest way):
+Click **Feedback** beside an editable cell. The default **Copy prompt** mode
+needs no API key: copy the generated prompt into your chosen AI chat.
 
-1. Click the **⚙ icon** at the top.
-2. Select feedback mode **"Copy prompt"** and save.
-3. Click **Feedback** on a cell → paste the generated text into
-   ChatGPT, Claude, etc. Done.
+For direct feedback, click the **⚙ icon** beside Feedback, choose **Direct API**,
+and enter your provider's API base URL, model and personal key. The provider must
+support an OpenAI-compatible chat-completions endpoint and browser CORS access.
+**Fetch models** lists compatible model IDs; it does not filter by price. Choose
+your provider and model according to your institution's access and usage terms.
 
-**With a free API key** (feedback appears directly on the page):
+All cells and integrated exercises open the same settings dialog. Choose
+**This tab** or **Remember on this device** for storage. A saved key is sent only
+to the configured provider. Previously saved Pyodide settings can be imported
+explicitly. No provider is selected automatically.
 
-1. Create a free account at [OpenRouter](https://openrouter.ai) and
-   generate a key at [openrouter.ai/keys](https://openrouter.ai/keys).
-2. In the panel, select the **"OpenRouter" provider preset** — the base URL
-   and a free model are filled in automatically — and paste the key.
-3. Optional: click **"Fetch models"** — by default the list shows
-   **only free models** (so nobody accidentally spends money);
-   clicking one fills the model field.
-4. Save. The panel collapses, and every cell now has a working
-   **Feedback** button.
-
-### Setup (all fields)
-
-The **⚙ icon** at the top of the document opens the collapsible settings
-panel for:
-
-| Field | Meaning |
-|-------|---------|
-| Provider preset | fills in the base URL + example model for OpenRouter, Cerebras, Groq, OpenAI, or Ollama |
-| Base URL | the API endpoint, e.g. `https://openrouter.ai/api/v1` |
-| API key | stays strictly local in the browser |
-| Model | freely editable; **"Fetch models"** lists the provider's models — by default only free ones (with a warning for providers that don't expose pricing info) |
-| Feedback mode | **Direct API** (default) or **Copy prompt** |
-| Storage | `localStorage` (persistent) or `sessionStorage` (per tab) |
-
-The panel collapses automatically after saving. The ℹ️ button gives
-beginner-friendly, per-provider guidance on where to find the base URL,
-key, and a (free) model.
-
-### Supported providers (any OpenAI-compatible API)
-
-The call is a generic `POST {baseUrl}/chat/completions` with
-`Authorization: Bearer {key}`; both `max_tokens` **and**
-`max_completion_tokens` are set (with automatic retry if a provider
-rejects one of the fields).
-
-| Provider | Base URL | Note |
-|----------|---------|------|
-| [OpenRouter](https://openrouter.ai) | `https://openrouter.ai/api/v1` | free models have a `:free` suffix |
-| [Cerebras](https://cloud.cerebras.ai) | `https://api.cerebras.ai/v1` | very fast, free tier |
-| [Groq](https://console.groq.com) | `https://api.groq.com/openai/v1` | fast, free tier |
-| [OpenAI](https://platform.openai.com) | `https://api.openai.com/v1` | paid |
-| [Ollama](https://ollama.com) (local) | `http://localhost:11434/v1` | no API key needed |
-
-### "Copy prompt" mode (no API key)
-
-Clicking **Feedback** generates a copyable text **including the system
-prompt**, which can be pasted into ChatGPT, Claude, etc.
-
-### Clicking Feedback before setup is done
-
-If a cell's Feedback button is clicked before the base URL/model are
-configured, the error message includes its own **⚙ button**. Clicking it
-moves the (single, shared) settings panel right into that cell, next to
-the error — no scrolling anywhere. Clicking the gear icon at the top of
-the page instead moves the panel back there.
+Feedback can be requested before Python has loaded or before code has run.
+Direct mode with incomplete settings offers a button to open the same dialog.
+The shared runtime owns API requests, model compatibility and Markdown/LaTeX
+rendering.
 
 ### Progressive hints
 
-The hint level rises with each click of the Feedback button on the same
+The hint level rises with each successfully displayed response of the Feedback button on the same
 cell (1 = gentle nudge, 2 = the problem explained concretely, 3 = the
 solution approach described in words — never finished solution code).
 Can be disabled via `feedback-hints: false`.
@@ -631,3 +585,35 @@ licensed under the
 `coi-serviceworker.js` is based on
 [gzuidhof/coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker)
 (MIT license).
+
+## Shared AI feedback (integration branch)
+
+Feedback uses the bundled `ai-feedback` 0.3.0 runtime, or the identical explicit
+Quarto extension when installed. Existing documents need no extra filter. The
+gear opens one shared settings dialog for all exercises on the page; copy-prompt
+mode is the default. Previously saved Pyodide credentials are offered for explicit
+import in that dialog. `pyodide: feedback-storage: session` remains the default
+storage choice unless explicit shared configuration or saved settings override it.
+
+Supply `#| task: ...` for the assignment and optionally
+`#| feedback-context: context-id` for explicitly selected prose. The execution
+`context` option still means `interactive`, `setup`, or `output`; it is separate
+from feedback context. With no task, feedback reviews the code without inventing
+an assignment. Three hints retain the original tutor policy: even the last hint
+explains the approach in words without supplying finished code.
+
+Feedback never runs Python. A matching completed run can contribute stdout and
+a generic execution status, never raw stderr, HTML, figures or setup source.
+Editing, Reset, a new Run or a worker restart invalidate that evidence and cancel
+pending feedback. Selected-line runs provide no evidence for a different full
+editor. Run, Stop, input, plots, setup/output, autorun, readonly and additional
+editors keep their execution behavior.
+
+The tutor policy remains localized in English, German, Swedish, Norwegian and
+Danish (`nb` is a Norwegian alias). Shared settings support English, German and
+Norwegian for these locales; Swedish and Danish use English shared controls.
+`feedback: false` removes the feedback dependency; `feedback-hints: false` uses
+review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
+Refresh the generated fallback with `python scripts/sync-ai-feedback.py PATH_TO_AI_FEEDBACK`.
+The workbench in `Erasmus-CTM/ai-feedback` pins this feature branch before any
+consumer migration PR.
