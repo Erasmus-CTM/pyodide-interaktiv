@@ -708,8 +708,8 @@ button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
 .qpyodide-editor-toolbar .qpyodide-feedback-gear {
   margin: 0;
   padding: .375rem .75rem;
-  font-size: inherit;
-  line-height: 1.5;
+  font-size: .9rem;
+  line-height: 1;
 }
 
 /* Runtime status spans the complete header grid. */
