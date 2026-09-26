@@ -1,0 +1,24 @@
+---
+title: "pyodide-interaktiv example"
+format: html
+filters: [pyodide-interaktiv]
+ai-feedback:
+  mode: copy
+pyodide:
+  feedback: true
+---
+
+## Print a total
+
+Complete the loop to add all the values and print their total.
+
+```{pyodide-python}
+#| task: Use a loop to add all the values and print their total without using sum().
+values = [3, 5, 2]
+total = 0
+for value in values:
+    total = value  # TODO: preserve the earlier values
+print(total)
+```
+
+Choose Run to execute your draft, then Feedback for guidance.

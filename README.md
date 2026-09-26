@@ -618,7 +618,7 @@ Norwegian for these locales; Swedish and Danish use English shared controls.
 review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
 Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
 when running consumer tests. For this preview install
-`Erasmus-CTM/ai-feedback@feature/layered-feedback` (0.5.0).
+`Erasmus-CTM/ai-feedback@feature/shared-context` (0.5.0).
 The workbench in `Erasmus-CTM/ai-feedback` pins this feature branch before any
 consumer migration PR.
 
@@ -633,3 +633,7 @@ mode. Run/Check resets progression by default; set `reset-on-run: false` to keep
 Explicit Reset always restarts at step one.
 
 See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/feedback-policies.md).
+
+### Standalone example
+
+`example.qmd` demonstrates this package with shared feedback. Install `Erasmus-CTM/ai-feedback@feature/shared-context`, then run `quarto render example.qmd`. No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
