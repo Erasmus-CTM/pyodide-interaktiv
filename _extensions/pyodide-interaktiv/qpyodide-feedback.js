@@ -25,7 +25,7 @@
       const gear = F.settingsButton(uiLanguage);
       gear.classList.add('qpyodide-feedback-gear');
       unit.feedbackButton.after(gear);
-      return F.attach({integration: 'pyodide-interaktiv', policyDefaults: options.hints ? {} : {steps: []}, id: 'pyodide-' + unit.uid, button: unit.feedbackButton, output,
+      return F.attach({integration: 'pyodide-interaktiv', policySelection: unit.options?.policySelection, policyDefaults: options.hints ? {} : {steps: []}, id: 'pyodide-' + unit.uid, button: unit.feedbackButton, output,
         uiLanguage,
         getRequest() {
           const code = unit.getCode();

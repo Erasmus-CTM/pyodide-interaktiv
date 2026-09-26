@@ -155,6 +155,7 @@ local qPyodideDefaultCellOptions = {
   ["context"] = "",
   ["task"] = "",
   ["feedback-context"] = "",
+  ["feedback-policy"] = "",
   ["warning"] = "true",
   ["message"] = "true",
   ["results"] = "markup",
@@ -745,7 +746,7 @@ local function extractCodeBlockOptions(block)
     end
   end
 
-  if feedback then cellOptions["feedbackContext"] = feedback.context(block, cellOptions, true) end
+  if feedback then cellOptions.policySelection = feedback.selection(block, cellOptions); cellOptions["feedbackContext"] = feedback.context(block, cellOptions, true) end
   if cellOptions.context and cellOptions.context ~= "setup" and cellOptions.context ~= "output" and cellOptions.context ~= "interactive" then cellOptions.context = "" end
   -- Merge cell options with default options
   cellOptions = mergeCellOptions(cellOptions)
@@ -1412,7 +1413,7 @@ local function enableMarkedPythonCodeCell(el)
     return pandoc.CodeBlock(cellCode, el.attr)
   end
 
-  if feedback then markerOptions.feedbackContext = feedback.context(el, markerOptions, true) end
+  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el, markerOptions, true) end
   return buildInteractiveCell(cellCode, markerOptions)
 end
 
@@ -1625,7 +1626,7 @@ local function handleMarkedCellDiv(el)
     return el
   end
 
-  if feedback then markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
+  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
   local insertion = buildInteractiveCell(cellCode, markerOptions)
 
   -- Keep Quarto's own figure float (and with it the caption and the
