@@ -5,8 +5,16 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      AI_FEEDBACK_EXTENSION: ${{ github.workspace }}/_feedback-source/_extensions/ai-feedback
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch shared feedback dependency
+        uses: actions/checkout@v4
+        with:
+          repository: Erasmus-CTM/ai-feedback
+          ref: 094b763ac942da049a22d5d0a6e349d52fbabced
+          path: _feedback-source
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
