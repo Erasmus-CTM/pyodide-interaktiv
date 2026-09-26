@@ -1,9 +1,11 @@
 # Acknowledgements
 
-## Funding
+Developed by the **CTM team** as part of the Erasmus+ project
+**“Computational Thinking makes sense of Mathematics”**
+(project **2023-1-NO01-KA220-HED-000166744**).
 
-Part of this work was funded by the Erasmus+ project “Computational
-Thinking makes sense of Mathematics” (2023-1-NO01-KA220-HED-000166744).
+[About Erasmus-CTM](https://github.com/Erasmus-CTM).
+
 
 ## Origin and license
 
@@ -13,7 +15,7 @@ file – nor has it ever had one in its commit history – so the license
 status of the code carried over from it is unclear and not covered by
 "MIT" or any other license.
 
-Own additions and modifications by CTM Workshop (including the Web Worker
+Own additions and modifications by CTM team (including the Web Worker
 architecture, AI feedback, canvas plots, and multilingual support) are
 licensed under the
 [GNU Affero General Public License v3.0](../LICENSE).
