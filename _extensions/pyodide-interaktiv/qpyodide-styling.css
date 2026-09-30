@@ -536,9 +536,12 @@ body.quarto-dark .qpyodide-terminal code {
    unreadable. Since WE trigger this sync, this side effect outside our
    own elements is our responsibility too. `:not(pre) > code` leaves real
    code blocks (<pre><code class="sourceCode">, with their own syntax
-   highlighting) untouched. */
+   highlighting) untouched.
+   Colour: NOT the body text colour, otherwise inline code is no longer
+   distinguishable from the surrounding text. Default is Bootstrap's dark-mode
+   code colour; a theme can override it via --qpyodide-inline-code-color. */
 body.quarto-dark :not(pre) > code {
-  color: var(--bs-body-color, #dee2e6) !important;
+  color: var(--qpyodide-inline-code-color, #e685b5) !important;
   background-color: var(--bs-tertiary-bg, #2b3035) !important;
 }
 

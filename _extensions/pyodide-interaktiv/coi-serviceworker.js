@@ -45,8 +45,15 @@ if (typeof window === "undefined") {
     // Skip opaque requests (e.g. no-cors cross-origin)
     if (req.cache === "only-if-cached" && req.mode !== "same-origin") return;
 
+    // Cross-origin resources without CORS (e.g. <img src="https://…">) have to be
+    // fetched WITHOUT credentials, otherwise COEP "credentialless" blocks the opaque
+    // response (net::ERR_FAILED). Same as upstream coi-serviceworker.
+    const request = req.mode === "no-cors"
+      ? new Request(req, { credentials: "omit" })
+      : req;
+
     event.respondWith(
-      fetch(req).then(resp => {
+      fetch(request).then(resp => {
         if (resp.status === 0) return resp;
         const headers = new Headers(resp.headers);
         headers.set("Cross-Origin-Opener-Policy", "same-origin");

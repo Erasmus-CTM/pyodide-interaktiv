@@ -60,6 +60,14 @@ globalThis.qpyodideStorage = (function () {
     return hash.toString(36);
   }
 
+  // Same rule as qpyodideCreateCell() in qpyodide-cell-classes.js: every
+  // context except "output"/"setup" -- including the empty default that
+  // `main` uses since the echo/include mapping -- becomes an InteractiveCell.
+  function isInteractive(options) {
+    const context = (options && options.context) || "";
+    return context !== "output" && context !== "setup";
+  }
+
   function computeIdentities(cellDetails) {
     const seenHashes = Object.create(null);
     const identities = Object.create(null);
@@ -67,7 +75,7 @@ globalThis.qpyodideStorage = (function () {
     (cellDetails || []).forEach((entry) => {
       // Only editable, interactive cells ever get a code editor a student
       // can type into -- output/setup cells have nothing to restore.
-      if (entry.options.context !== "interactive") return;
+      if (!isInteractive(entry.options)) return;
 
       const label = (entry.options.label || "").trim();
       if (label) {
@@ -136,7 +144,7 @@ globalThis.qpyodideStorage = (function () {
   // possibly apply to some cell on this page (document default, or at least
   // one cell opting in on its own even though the document default is off).
   const anyEnabled = docEnabled || (globalThis.qpyodideCellDetails || []).some(
-    (entry) => entry.options.context === "interactive" &&
+    (entry) => isInteractive(entry.options) &&
       entry.options["local-storage"] === "true"
   );
 
