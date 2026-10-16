@@ -48,3 +48,17 @@ globalThis.qpyodideFeedbackOptions = {
   storage: "{{FEEDBACKSTORAGE}}",
   hints: {{FEEDBACKHINTS}}
 };
+
+// Local-storage autosave feature settings ----
+//
+// enabled : document-wide default (`pyodide: local-storage: true`); a
+//           cell's own `#| local-storage: true/false` overrides this.
+// epoch   : "" (off) unless `pyodide: local-storage-epoch:` was set. When
+//           non-empty, it's folded into every saved-code storage key, so
+//           re-rendering with a new epoch value makes every previously
+//           saved answer on this page unreachable -- an exam-room "next
+//           group gets a clean slate" reset. See qpyodide-storage.js.
+globalThis.qpyodideLocalStorageOptions = {
+  enabled: {{LOCALSTORAGEENABLED}},
+  epoch: "{{LOCALSTORAGEEPOCH}}"
+};

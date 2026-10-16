@@ -5,14 +5,15 @@ const path = require('node:path');
 const {JSDOM} = require('jsdom');
 const ext = path.join(__dirname, '../_extensions/pyodide-interaktiv');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function page({language='en', storage='session', hints=true, enabled=true} = {}) {
+function page({language='en', storage='session', hints=true, enabled=true, autosave=false} = {}) {
   const dom = new JSDOM('<main></main>', {url:'https://course.invalid/examples.html', runScripts:'outside-only'});
   const w = dom.window;
-  w.AbortController = AbortController;
+  w.AbortController = AbortController; w.confirm=()=>true;
   for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(process.env.AI_FEEDBACK_EXTENSION,file),'utf8'));
   w.qpyodideLang = language;
   w.qpyodideFeedbackOptions = {enabled,hints,storage};
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-locales.js'),'utf8'));
+  if(autosave){w.qpyodideLocalStorageOptions={enabled:true,epoch:''};w.qpyodideCellDetails=[{id:'1',code:'print(80)',options:{label:'one'}}];w.eval(fs.readFileSync(path.join(ext,'qpyodide-storage.js'),'utf8'));}
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-feedback.js'),'utf8'));
   let runs = 0, execute = async () => ({entries:[{type:'stdout',message:'80'}], images:[]});
   const proxy = {runCell: async (...args) => {runs++; return execute(...args);}, clearInterrupt(){}};
@@ -103,4 +104,15 @@ test('Run resets hint progression unless the integration policy opts out',async(
  w.__aiFeedbackPolicies={projectPolicy:'preserve',layers:[{policies:{preserve:{'reset-on-run':false}}}]};
  await prompt(u);await u.runCode(u.getCode());await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 2');
  u.resetButton.click();await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 1');w.close();
+});
+test('declining the upstream Reset confirmation preserves draft and hint progress',async()=>{
+ const {w,unit}=page();const u=unit();await prompt(u);u.editor.setValue('changed');w.confirm=()=>false;u.resetButton.click();assert.equal(u.getCode(),'changed');await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 2');w.close();
+});
+
+test('bulk autosave deletion resets real feedback counters and suppresses late run output',async()=>{
+ const {w,unit,setExecute}=page({autosave:true});const u=unit();await prompt(u);u.editor.setValue('changed');await prompt(u);
+ let finish;setExecute(()=>new Promise(resolve=>{finish=resolve;}));const pending=u.runCode(u.getCode());await tick();
+ w.qpyodideResetAllStorageUnits();finish({entries:[{type:'stdout',message:'LATE_OUTPUT'}],images:[],html:'<b>LATE_OUTPUT</b>'});await pending;
+ assert.equal(u.getCode(),'print(80)');assert.equal(u.outputCodeDiv.textContent,'');assert.deepEqual(evidence(u),[]);
+ await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint').textContent,'Hint 1');w.close();
 });
