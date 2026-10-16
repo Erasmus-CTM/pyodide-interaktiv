@@ -8,7 +8,7 @@ These examples currently use the integration preview. For AI feedback, install
 the shared extension once in the same Quarto project:
 
 ```sh
-quarto add Erasmus-CTM/ai-feedback@feature/scoped-policies
+quarto add Erasmus-CTM/ai-feedback@main
 ```
 
 Then install this extension:
@@ -29,7 +29,7 @@ filters:
 
 ## Feedback setup
 
-For feedback directly on the page, follow the [shared connection guide](https://github.com/Erasmus-CTM/ai-feedback/blob/feature/scoped-policies/docs/installation.md#provider-settings-and-data-sent). Without a connection, Feedback prepares a message to copy into an AI chat.
+For feedback directly on the page, follow the [shared connection guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/installation.md#provider-settings-and-data-sent). Without a connection, Feedback prepares a message to copy into an AI chat.
 
 ## Enable feedback in an HTML page
 

@@ -573,7 +573,7 @@ Norwegian for these locales; Swedish and Danish use English shared controls.
 review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
 Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
 when running consumer tests. For this preview install
-`Erasmus-CTM/ai-feedback@feature/scoped-policies` (0.6.0).
+`Erasmus-CTM/ai-feedback@main` (0.6.0).
 The workbench in `Erasmus-CTM/ctm-assessment` pins this feature branch before any
 consumer migration PR.
 
@@ -581,7 +581,7 @@ consumer migration PR.
 
 With ai-feedback 0.4.0, use `ai-feedback.policy-files` in Quarto metadata to
 load one YAML file or an ordered list. Each file defines `ai-feedback.defaults`
-and/or `ai-feedback.integrations` with this integration’s name. Configure `prompt`,
+and/or `ai-feedback.integrations` with this integration’s name. Configure `base-prompt`,
 `steps`, `language`, `max-words`, `max-issues`, `allow-full-solution` and
 `reset-on-run`. Later step lists replace earlier lists; `steps: []` selects review
 mode. Run/Check resets progression by default; set `reset-on-run: false` to keep it.
@@ -591,7 +591,7 @@ See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/ma
 
 ### Standalone example
 
-`example.qmd` demonstrates this package with shared feedback. Install `Erasmus-CTM/ai-feedback@feature/scoped-policies`, then run `quarto render example.qmd`. No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
+`example.qmd` demonstrates this package with shared feedback. Install `Erasmus-CTM/ai-feedback@main`, then run `quarto render example.qmd`. No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
 
 ### Page and exercise feedback policies
 
@@ -606,5 +606,5 @@ accepted. The same named policy can be reused in every integration. YAML
 `ai-feedback.exercises.<integration>.<label>` targets a specific authored label;
 an explicit named selection takes precedence over that entry. Omitted settings
 inherit; `steps` replaces the entire list and `steps: []` disables progression.
-See [the shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/feature/scoped-policies/docs/feedback-policies.md).
-During preview, install `Erasmus-CTM/ai-feedback@feature/scoped-policies`.
+See [the shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/feedback-policies.md).
+During preview, install `Erasmus-CTM/ai-feedback@main`.
