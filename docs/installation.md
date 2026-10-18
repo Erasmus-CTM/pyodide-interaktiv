@@ -14,7 +14,8 @@ This also installs the shared ai-feedback extension that AI feedback uses: the
 repository ships a copy of it (`_extensions/ai-feedback`, recorded in
 `.github/ai-feedback-source.json`), so projects made for earlier versions with
 built-in feedback build unchanged after the update. Feedback is on unless
-`pyodide: feedback: false`; with it off, ai-feedback is not loaded. A page that
+`pyodide: feedback: false`; with it off, ai-feedback is loaded only for pages
+with `::: {.ai-feedback}` activities. A page that
 uses an optional extension that is not installed (`::: {.ai-feedback}`
 activities without ai-feedback, `.jsxgraph` boards without JSXGraph) stops
 rendering with the install command.
@@ -50,6 +51,11 @@ pyodide:
 ```
 
 Add a `#| task:` line to each exercise so feedback knows what students are being asked to do.
+
+`quarto add Erasmus-CTM/pyodide-interaktiv` and `quarto add Erasmus-CTM/ai-feedback`
+write the same folder, `_extensions/Erasmus-CTM/ai-feedback`; the command run
+last decides its version. Update pyodide-interaktiv after ai-feedback, or run
+both again, if you need a particular ai-feedback version.
 
 ## Maintaining the shipped ai-feedback
 

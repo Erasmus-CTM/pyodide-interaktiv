@@ -40,6 +40,9 @@ test('a 1.6 project builds unchanged, with feedback and its settings', { skip },
     assert.match(r.html, /feedback-core\.js/);
     assert.match(r.html, /enabled: true/);
     assert.match(r.html, /storage: "session"/);
+    // The shared settings leave storage to pyodide's feedback-storage.
+    const shared = JSON.parse(r.html.match(/window\.__aiFeedbackConfig = (\{.*?\});/)[1]);
+    assert.equal(Object.hasOwn(shared, 'storage'), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -58,5 +61,17 @@ test('copied by hand without ai-feedback, the render names the install command',
     const r = render(dir);
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /quarto add Erasmus-CTM\/ai-feedback/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('feedback: false with an activity on the page keeps hidden callouts out of its context', { skip }, () => {
+  const dir = project(undefined, text => text.replace('feedback: true', 'feedback: false'));
+  try {
+    fs.appendFileSync(path.join(dir, 'index.qmd'), '\n::: {.callout-note .ai-feedback-ignore}\nSECRET SOLUTION 42\n:::\n\n::: {.ai-feedback}\nExplain.\n:::\n');
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    const data = [...r.html.matchAll(/class="ai-feedback-data"[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
+    assert.ok(data.length > 0, 'activity data present');
+    assert.doesNotMatch(data, /SECRET SOLUTION/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

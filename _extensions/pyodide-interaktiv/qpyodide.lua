@@ -1769,6 +1769,7 @@ local function stitchDocument(doc)
 end
 
 -- Shared locator for ai-feedback and JSXGraph (feedback-loader.lua).
+local needFeedback = false
 local dependencies = nil
 local function deps()
   dependencies = dependencies or dofile(quarto.utils.resolve_path("feedback-loader.lua"))
@@ -1779,20 +1780,25 @@ return {
   {
     Meta = setPyodideInitializationOptions
   },
+  -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback shipped
+  -- with this extension is installed together with it. A page that uses a
+  -- missing optional extension stops with the install command. Decided before
+  -- callouts are marked, so hidden callouts never reach a feedback context.
+  { Pandoc = function(doc)
+      if not quarto.doc.is_format("html") then return doc end
+      deps().requireUsed(doc, "pyodide-interaktiv")
+      needFeedback = feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] == true
+      return doc
+    end },
   { Callout = function(c)
-      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
+      if needFeedback and quarto.doc.is_format("html") then
         feedback = feedback or deps().feedback()
         return feedback.markCallout(c)
       end
       return c
     end },
   { Pandoc = function(doc)
-      if not quarto.doc.is_format("html") then return doc end
-      -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback
-      -- shipped with this extension is installed together with it. A page
-      -- that uses a missing optional extension stops with the install command.
-      deps().requireUsed(doc, "pyodide-interaktiv")
-      if feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] then
+      if needFeedback and quarto.doc.is_format("html") then
         feedback = feedback or deps().feedback()
         return feedback.prepare(doc)
       end

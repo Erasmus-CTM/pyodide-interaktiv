@@ -545,8 +545,9 @@ protected in both cases.
 
 ## Shared AI feedback (integration branch)
 
-Install `ai-feedback` once in the project. The Pyodide filter loads it automatically;
-no shared runtime is bundled here. Existing filter lists need no extra entry. The
+The shared `ai-feedback` extension is installed together with this one (the
+repository ships a copy; see [installation](installation.md)). The Pyodide filter
+loads it automatically; existing filter lists need no extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
 import in that dialog. Settings storage follows `ai-feedback: storage:` when it
@@ -572,11 +573,11 @@ editors keep their execution behavior.
 Feedback follows the selected English, German, Swedish, Norwegian or Danish
 language (`nb` is a Norwegian alias); teaching instructions live in shared YAML. Shared settings support English, German and
 Norwegian for these locales; Swedish and Danish use English shared controls.
-`feedback: false` removes the feedback dependency; `feedback-hints: false` uses
+`feedback: false` removes the feedback dependency (unless the page has
+`.ai-feedback` activities); `feedback-hints: false` uses
 review mode. `npm ci && npm test` runs adapter and execution-boundary regressions. In VS Code, **Terminal → Run Task…** offers the same commands (`.vscode/tasks.json`): the default test task runs the tests, the default build task renders and then tests.
-Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
-when running consumer tests. For this preview install
-`Erasmus-CTM/ai-feedback@main` (0.8.0).
+The tests use the shipped `_extensions/ai-feedback`; set `AI_FEEDBACK_EXTENSION`
+to another installed ai-feedback directory to test against it.
 The workbench in `Erasmus-CTM/ctm-assessment` pins this feature branch before any
 consumer migration PR.
 
@@ -602,7 +603,7 @@ See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/ma
 
 ### Standalone example
 
-`example.qmd` demonstrates this package with shared feedback. Install `Erasmus-CTM/ai-feedback@main`, then run `quarto render example.qmd`. No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
+`example.qmd` demonstrates this package with shared feedback. Run `quarto render example.qmd` (the shipped ai-feedback is used). No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
 
 ### Page and exercise feedback policies
 

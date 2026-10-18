@@ -78,14 +78,16 @@
   background-color: var(--bs-tertiary-bg, #eeeeee);
   display: inline-block;
   font-weight: 400;
-  line-height: 1;
   text-decoration: none;
   text-align: center;
   color: var(--bs-body-color, #000);
   border: 1px solid var(--bs-border-color, #dee2e6);
-  padding: 0.375rem 0.75rem;
-  font-size: .9rem;
-  border-radius: 0.25rem;
+  /* Common CTM button size, shared by all CTM components; set the
+     --ctm-button-* variables in your CSS or theme to change all of them. */
+  font-size: var(--ctm-button-font-size, .875rem);
+  padding: var(--ctm-button-padding-y, .375rem) var(--ctm-button-padding-x, .75rem);
+  line-height: var(--ctm-button-line-height, 1.5);
+  border-radius: var(--ctm-button-radius, var(--bs-border-radius, .375rem));
   transition: color .15s ease-in-out, background-color .15s ease-in-out,
               border-color .15s ease-in-out, box-shadow .15s ease-in-out;
 }
@@ -918,9 +920,9 @@ button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
 
 .qpyodide-editor-toolbar .qpyodide-feedback-gear {
   margin: 0;
-  padding: .375rem .75rem;
-  font-size: .9rem;
-  line-height: 1;
+  font-size: var(--ctm-button-font-size, .875rem);
+  padding: var(--ctm-button-padding-y, .375rem) var(--ctm-button-padding-x, .75rem);
+  line-height: var(--ctm-button-line-height, 1.5);
 }
 
 /* Runtime status spans the complete header grid. */
