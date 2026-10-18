@@ -17,12 +17,16 @@ jobs:
       - uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: '1.8.27'
+      # The ai-feedback shipped in _extensions/ is used unless a review
+      # version is requested.
       - uses: actions/checkout@v4
+        if: steps.review.outputs['ai-feedback']
         with:
           repository: Erasmus-CTM/ai-feedback
-          ref: ${{ steps.review.outputs['ai-feedback'] || 'main' }}
+          ref: ${{ steps.review.outputs['ai-feedback'] }}
           path: _feedback-source
-      - run: quarto add ./_feedback-source --no-prompt
+      - if: steps.review.outputs['ai-feedback']
+        run: rm -rf _extensions/ai-feedback && quarto add ./_feedback-source --no-prompt
       - name: Render standalone example
         run: |
           quarto render example.qmd

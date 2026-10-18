@@ -1,0 +1,15 @@
+---
+title: Alte Seite
+---
+
+```{pyodide-python}
+x = [1, 2, 3, 4, 5]
+print(sum(x))
+```
+
+```{pyodide-python}
+#| code-fold: true
+#| local-storage: true
+def quadrat(n):
+    return n * n
+```

@@ -4,18 +4,27 @@
 
 ## Installation
 
-These examples currently use the integration preview. For AI feedback, install
-the shared extension once in the same Quarto project:
-
-```sh
-quarto add Erasmus-CTM/ai-feedback@main
-```
-
-Then install this extension:
+These examples currently use the integration preview:
 
 ```bash
 quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration
 ```
+
+This also installs the shared ai-feedback extension that AI feedback uses: the
+repository ships a copy of it (`_extensions/ai-feedback`, recorded in
+`.github/ai-feedback-source.json`), so projects made for earlier versions with
+built-in feedback build unchanged after the update. Feedback is on unless
+`pyodide: feedback: false`; with it off, ai-feedback is loaded only for pages
+with `::: {.ai-feedback}` activities. A page that
+uses an optional extension that is not installed (`::: {.ai-feedback}`
+activities without ai-feedback, `.jsxgraph` boards without JSXGraph) stops
+rendering with the install command.
+
+**Quarto 1.10:** this release sends pages with blocks such as
+`{math-exercise}`, `{py-exercise}` or `{pyodide-python}` to Jupyter (an
+upstream regression, reported). Until it is fixed, add `engine: markdown` to
+the front matter of each such page (in `_quarto.yml` it has no effect), or use
+Quarto 1.8.
 
 Enable it in your document:
 
@@ -42,3 +51,21 @@ pyodide:
 ```
 
 Add a `#| task:` line to each exercise so feedback knows what students are being asked to do.
+
+`quarto add Erasmus-CTM/pyodide-interaktiv` and `quarto add Erasmus-CTM/ai-feedback`
+write the same folder, `_extensions/Erasmus-CTM/ai-feedback`; the command run
+last decides its version. Update pyodide-interaktiv after ai-feedback, or run
+both again, if you need a particular ai-feedback version.
+
+## Maintaining the shipped ai-feedback
+
+The copy in `_extensions/ai-feedback` is generated, never edited by hand.
+Update it from an ai-feedback checkout at the commit to ship:
+
+```sh
+python scripts/sync-ai-feedback.py ../ai-feedback
+```
+
+CI checks that the copy equals the recorded commit. This is a temporary
+arrangement for existing projects, to be revisited with the maintainers; the
+CTM Assessment package ignores this copy and uses its own pinned ai-feedback.

@@ -43,7 +43,7 @@ local hasDonePyodideSetup = false
 -- https://pyodide.org/en/stable/usage/api/js-api.html#globalThis.loadPyodide
 
 -- Define a base compatibile version
-local baseVersionPyodide = "0.27.2"
+local baseVersionPyodide = "0.28.3"
 
 -- Define where Pyodide can be found. Default:
 -- https://cdn.jsdelivr.net/pyodide/v0.z.y/full/
@@ -51,6 +51,39 @@ local baseVersionPyodide = "0.27.2"
 local baseUrl = "https://cdn.jsdelivr.net/pyodide/v".. baseVersionPyodide .."/"
 local buildVariant = "full/"
 local indexURL = baseUrl .. buildVariant
+
+-- Backend for interactive Matplotlib plots (qpyodide-canvas-plots.js).
+-- WebAgg needs the browser patch that Pyodide ships from 0.28 on; without it
+-- the backend needs a Tornado server, which Pyodide does not have. A project
+-- that pins an older Pyodide via `base-url:` therefore keeps the 1.6/1.7
+-- html5_canvas_backend path. "auto": the URL names no version (e.g. a
+-- self-hosted copy); the page then decides from the loaded Pyodide's version.
+local canvasBackend = "webagg"
+
+-- Major and minor version of the Pyodide release a base URL points to, e.g.
+-- https://cdn.jsdelivr.net/pyodide/v0.27.2/ or .../npm/pyodide@0.27.2/.
+-- nil if the URL names no version.
+local function pyodideVersionFromUrl(url)
+  local major, minor = url:match("/v(%d+)%.(%d+)%.%d+")
+  if not major then
+    major, minor = url:match("pyodide@(%d+)%.(%d+)%.%d+")
+  end
+  if not major then
+    return nil
+  end
+  return tonumber(major), tonumber(minor)
+end
+
+local function canvasBackendForUrl(url)
+  local major, minor = pyodideVersionFromUrl(url)
+  if major == nil then
+    return "auto"
+  end
+  if major == 0 and minor < 28 then
+    return "html5-canvas"
+  end
+  return "webagg"
+end
 
 -- Define user directory
 local homeDir = "/home/pyodide"
@@ -360,6 +393,7 @@ local function setPyodideInitializationOptions(meta)
   -- The base URL used for downloading Python WebAssembly binaries
   if isVariablePopulated(pyodide["base-url"]) then
     baseUrl = pandoc.utils.stringify(pyodide["base-url"])
+    canvasBackend = canvasBackendForUrl(baseUrl)
   end
 
   -- The build variant for Python WebAssembly binaries. Default: 'full'
@@ -368,7 +402,16 @@ local function setPyodideInitializationOptions(meta)
   end
 
   if isVariablePopulated(pyodide["build-variant"]) or isVariablePopulated(pyodide["base-url"]) then
-    indexURL = baseUrl .. buildVariant
+    -- The scripts load indexURL .. "pyodide.mjs", so both parts must end in
+    -- "/". The documented `build-variant: full` (and a base-url typed without
+    -- its trailing slash) would otherwise yield ".../fullpyodide.mjs".
+    local function directory(part)
+      if part ~= "" and part:sub(-1) ~= "/" then
+        return part .. "/"
+      end
+      return part
+    end
+    indexURL = directory(baseUrl) .. directory(buildVariant)
   end
 
   -- The WebAssembly user's home directory and initial working directory. Default: '/home/pyodide'
@@ -480,6 +523,7 @@ local function initializationPyodide()
   -- Setup different Pyodide specific initialization variables
   local substitutions = {
     ["INDEXURL"] = indexURL,
+    ["CANVASBACKEND"] = canvasBackend,
     ["HOMEDIR"] = homeDir,
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
@@ -632,7 +676,7 @@ local function ensurePyodideSetup()
   -- on a separate font file surviving the bundling; markup elsewhere in
   -- this extension is unchanged either way.
   quarto.doc.include_text("in-header", [[
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46.0/min/vs/editor/editor.main.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46/min/vs/editor/editor.main.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
   ]])
 
@@ -1768,20 +1812,38 @@ local function stitchDocument(doc)
   return doc
 end
 
+-- Shared locator for ai-feedback and JSXGraph (feedback-loader.lua).
+local needFeedback = false
+local dependencies = nil
+local function deps()
+  dependencies = dependencies or dofile(quarto.utils.resolve_path("feedback-loader.lua"))
+  return dependencies
+end
+
 return {
   {
     Meta = setPyodideInitializationOptions
   },
+  -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback shipped
+  -- with this extension is installed together with it. A page that uses a
+  -- missing optional extension stops with the install command. Decided before
+  -- callouts are marked, so hidden callouts never reach a feedback context.
+  { Pandoc = function(doc)
+      if not quarto.doc.is_format("html") then return doc end
+      deps().requireUsed(doc, "pyodide-interaktiv")
+      needFeedback = feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] == true
+      return doc
+    end },
   { Callout = function(c)
-      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
-        feedback = feedback or dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+      if needFeedback and quarto.doc.is_format("html") then
+        feedback = feedback or deps().feedback()
         return feedback.markCallout(c)
       end
       return c
     end },
   { Pandoc = function(doc)
-      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
-        feedback = dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+      if needFeedback and quarto.doc.is_format("html") then
+        feedback = feedback or deps().feedback()
         return feedback.prepare(doc)
       end
       return doc

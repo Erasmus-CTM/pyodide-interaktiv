@@ -71,7 +71,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
-  base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/   # optional; WebAgg plots need Pyodide 0.28+
   build-variant: full
   show-startup-message: true
   feedback: true                 # show AI feedback buttons (default: true)
@@ -116,6 +116,8 @@ write a normal `{python}` cell instead and opt it into HTML with a
 #| label: fig-parabola
 #| fig-cap: "The parabola $y=x^2$."
 # pyodide: autorun, read-only=false
+import numpy as np
+import matplotlib.pyplot as plt
 x = np.linspace(-2, 2, 200)
 plt.plot(x, x**2)
 plt.show()
@@ -293,6 +295,38 @@ A cell run corresponds to a script run: figures that were never shown by
 the end are discarded. Otherwise they would pile up across repeated runs
 of the same cell, and a later `plt.show()` would output all of them at
 once.
+
+### Interactive plots and the Pyodide version
+
+Interactive plots use Matplotlib's WebAgg backend in a second Pyodide
+instance. WebAgg needs **Pyodide 0.28 or later**: from 0.28 on, Pyodide
+patches it to talk to the page directly; older releases would need a
+Tornado server, which Pyodide does not ship. The default (no `base-url`)
+is Pyodide 0.28.3.
+
+**Migration note (projects from 1.6/1.7 that pin `base-url`).** Earlier
+versions documented `base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/`.
+Such a project keeps building and keeps its interactive plots without
+changes: for a Pyodide below 0.28 the extension uses the 1.6/1.7 plot
+backend (matplotlib-pyodide's `html5_canvas_backend`) instead of WebAgg.
+That backend is frozen; toolbar and layout improvements are made for
+WebAgg only. To move to WebAgg, remove `base-url` or point it at Pyodide
+0.28 or later (e.g. `https://cdn.jsdelivr.net/pyodide/v0.28.3/`); note that
+a newer Pyodide also brings newer Python packages.
+
+The version is read from the URL (`/v0.27.2/` or `pyodide@0.27.2`). For a
+URL without a version, such as a self-hosted copy, the page picks the
+backend from the Pyodide it actually loads. The choice appears in the page
+as `qpyodideCanvasBackend` (`webagg`, `html5-canvas` or `auto`) and, after
+the first plot, in the browser console.
+
+### Matplotlib regression page
+
+[`plots_test.qmd`](../plots_test.qmd) is a standalone regression page for the
+interactive Matplotlib path. It covers MathText and subplot titles, toolbar
+layout and navigation, the snap cursor, multiple figures from one cell, and
+the explicit `canvas: false` PNG fallback. Render it from the repository root
+with `quarto render plots_test.qmd`.
 
 ### Animations
 
@@ -543,12 +577,14 @@ protected in both cases.
 
 ## Shared AI feedback (integration branch)
 
-Install `ai-feedback` once in the project. The Pyodide filter loads it automatically;
-no shared runtime is bundled here. Existing filter lists need no extra entry. The
+The shared `ai-feedback` extension is installed together with this one (the
+repository ships a copy; see [installation](installation.md)). The Pyodide filter
+loads it automatically; existing filter lists need no extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
-import in that dialog. `pyodide: feedback-storage: session` remains the default
-storage choice unless explicit shared configuration or saved settings override it.
+import in that dialog. Settings storage follows `ai-feedback: storage:` when it
+is set, otherwise `pyodide: feedback-storage:` (default `local`; `session` keeps
+settings for one tab); learners can change it in the dialog.
 
 Supply `#| task: ...` for the assignment and optionally
 `#| feedback-context: context-id` for explicitly selected prose. Omitted feedback
@@ -569,11 +605,11 @@ editors keep their execution behavior.
 Feedback follows the selected English, German, Swedish, Norwegian or Danish
 language (`nb` is a Norwegian alias); teaching instructions live in shared YAML. Shared settings support English, German and
 Norwegian for these locales; Swedish and Danish use English shared controls.
-`feedback: false` removes the feedback dependency; `feedback-hints: false` uses
-review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
-Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
-when running consumer tests. For this preview install
-`Erasmus-CTM/ai-feedback@main` (0.8.0).
+`feedback: false` removes the feedback dependency (unless the page has
+`.ai-feedback` activities); `feedback-hints: false` uses
+review mode. `npm ci && npm test` runs adapter and execution-boundary regressions. In VS Code, **Terminal → Run Task…** offers the same commands (`.vscode/tasks.json`): the default test task runs the tests, the default build task renders and then tests.
+The tests use the shipped `_extensions/ai-feedback`; set `AI_FEEDBACK_EXTENSION`
+to another installed ai-feedback directory to test against it.
 The workbench in `Erasmus-CTM/ctm-assessment` pins this feature branch before any
 consumer migration PR.
 
@@ -599,7 +635,7 @@ See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/ma
 
 ### Standalone example
 
-`example.qmd` demonstrates this package with shared feedback. Install `Erasmus-CTM/ai-feedback@main`, then run `quarto render example.qmd`. No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
+`example.qmd` demonstrates this package with shared feedback. Run `quarto render example.qmd` (the shipped ai-feedback is used). No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
 
 ### Page and exercise feedback policies
 
