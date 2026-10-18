@@ -71,7 +71,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
-  base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/
   build-variant: full
   show-startup-message: true
   feedback: true                 # show AI feedback buttons (default: true)
@@ -295,6 +295,14 @@ A cell run corresponds to a script run: figures that were never shown by
 the end are discarded. Otherwise they would pile up across repeated runs
 of the same cell, and a later `plt.show()` would output all of them at
 once.
+
+### Matplotlib regression page
+
+[`plots_test.qmd`](../plots_test.qmd) is a standalone regression page for the
+interactive Matplotlib path. It covers MathText and subplot titles, toolbar
+layout and navigation, the snap cursor, multiple figures from one cell, and
+the explicit `canvas: false` PNG fallback. Render it from the repository root
+with `quarto render plots_test.qmd`.
 
 ### Animations
 
