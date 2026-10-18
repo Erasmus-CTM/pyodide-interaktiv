@@ -19,6 +19,12 @@ uses an optional extension that is not installed (`::: {.ai-feedback}`
 activities without ai-feedback, `.jsxgraph` boards without JSXGraph) stops
 rendering with the install command.
 
+**Quarto 1.10:** this release sends pages with blocks such as
+`{math-exercise}`, `{py-exercise}` or `{pyodide-python}` to Jupyter (an
+upstream regression, reported). Until it is fixed, add `engine: markdown` to
+the front matter of each such page (in `_quarto.yml` it has no effect), or use
+Quarto 1.8.
+
 Enable it in your document:
 
 ```yaml

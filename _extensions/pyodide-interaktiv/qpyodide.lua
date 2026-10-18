@@ -632,7 +632,7 @@ local function ensurePyodideSetup()
   -- on a separate font file surviving the bundling; markup elsewhere in
   -- this extension is unchanged either way.
   quarto.doc.include_text("in-header", [[
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46.0/min/vs/editor/editor.main.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46/min/vs/editor/editor.main.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
   ]])
 

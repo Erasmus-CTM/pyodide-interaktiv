@@ -573,7 +573,7 @@ Feedback follows the selected English, German, Swedish, Norwegian or Danish
 language (`nb` is a Norwegian alias); teaching instructions live in shared YAML. Shared settings support English, German and
 Norwegian for these locales; Swedish and Danish use English shared controls.
 `feedback: false` removes the feedback dependency; `feedback-hints: false` uses
-review mode. `npm ci && npm test` runs adapter and execution-boundary regressions.
+review mode. `npm ci && npm test` runs adapter and execution-boundary regressions. In VS Code, **Terminal → Run Task…** offers the same commands (`.vscode/tasks.json`): the default test task runs the tests, the default build task renders and then tests.
 Set `AI_FEEDBACK_EXTENSION` to the absolute installed shared-extension directory
 when running consumer tests. For this preview install
 `Erasmus-CTM/ai-feedback@main` (0.8.0).
