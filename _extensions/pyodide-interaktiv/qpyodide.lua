@@ -402,7 +402,16 @@ local function setPyodideInitializationOptions(meta)
   end
 
   if isVariablePopulated(pyodide["build-variant"]) or isVariablePopulated(pyodide["base-url"]) then
-    indexURL = baseUrl .. buildVariant
+    -- The scripts load indexURL .. "pyodide.mjs", so both parts must end in
+    -- "/". The documented `build-variant: full` (and a base-url typed without
+    -- its trailing slash) would otherwise yield ".../fullpyodide.mjs".
+    local function directory(part)
+      if part ~= "" and part:sub(-1) ~= "/" then
+        return part .. "/"
+      end
+      return part
+    end
+    indexURL = directory(baseUrl) .. directory(buildVariant)
   end
 
   -- The WebAssembly user's home directory and initial working directory. Default: '/home/pyodide'

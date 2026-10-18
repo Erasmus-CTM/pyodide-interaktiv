@@ -86,7 +86,8 @@ test('a 1.6 project pinning Pyodide 0.27.2 keeps interactive plots on the 1.6 ca
   try {
     const r = render(dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(indexUrlOf(r.html), /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v0\.27\.2\//);
+    // `build-variant: full` (as documented) must still give a directory URL.
+    assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/');
     assert.equal(backendOf(r.html), 'html5-canvas');
     assert.match(r.html, /matplotlib_pyodide\.html5_canvas_backend/);
     // Nothing to fix for the author: no warning about plots.
@@ -99,7 +100,7 @@ test('without base-url, plots use WebAgg on Pyodide 0.28.3', { skip }, () => {
   try {
     const r = render(dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(indexUrlOf(r.html), /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v0\.28\.3\//);
+    assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.28.3/full/');
     assert.equal(backendOf(r.html), 'webagg');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -109,7 +110,26 @@ test('a base-url without a version leaves the backend to the loaded Pyodide', { 
   try {
     const r = render(dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(indexUrlOf(r.html), /^\/pyodide\//);
+    assert.equal(indexUrlOf(r.html), '/pyodide/full/');
     assert.equal(backendOf(r.html), 'auto');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('base-url and build-variant without trailing slashes still give a directory URL', { skip }, () => {
+  const dir = project(undefined, text => text.replace('pyodide/v0.27.2/', 'pyodide/v0.27.2'));
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/');
+    assert.equal(backendOf(r.html), 'html5-canvas');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('build-variant: full/ is kept as it is', { skip }, () => {
+  const dir = project(undefined, text => text.replace('build-variant: full', 'build-variant: full/'));
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
