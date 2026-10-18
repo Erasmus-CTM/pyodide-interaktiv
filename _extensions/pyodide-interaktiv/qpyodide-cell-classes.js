@@ -644,11 +644,16 @@ class EditorUnit {
       // Keyboard shortcuts must be re-registered per editor on focus change
       // (Monaco regression since 0.32.0):
       // https://github.com/microsoft/monaco-editor/issues/2947
+      // addCommand registers a page-wide keybinding; the context key limits it
+      // to this extension's editors, so other Monaco editors on the page (for
+      // example py-exercise) keep their own keys.
+      const shortcutContext = typeof thiz.editor.createContextKey === 'function'
+        ? (thiz.editor.createContextKey('qpyodideCellEditor', true), 'qpyodideCellEditor') : undefined;
       const addPyodideKeyboardShortCutCommands = () => {
         // Shift+Enter: run the entire cell content
         thiz.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
           thiz.runCode(thiz.editor.getValue());
-        });
+        }, shortcutContext);
 
         // Ctrl/Cmd+Enter: run the selection (or the current line)
         thiz.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -674,7 +679,7 @@ class EditorUnit {
           } else {
             thiz.runCode(selectedText);
           }
-        });
+        }, shortcutContext);
       };
 
       thiz.editor.onDidFocusEditorText(addPyodideKeyboardShortCutCommands);
