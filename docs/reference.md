@@ -549,10 +549,9 @@ Install `ai-feedback` once in the project. The Pyodide filter loads it automatic
 no shared runtime is bundled here. Existing filter lists need no extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
-import in that dialog. Settings storage follows `ai-feedback: storage:` (default
-`local`; `session` keeps settings for one tab), and learners can change it in the
-dialog. (`pyodide: feedback-storage:` is currently overridden by that shared
-setting.)
+import in that dialog. Settings storage follows `ai-feedback: storage:` when it
+is set, otherwise `pyodide: feedback-storage:` (default `local`; `session` keeps
+settings for one tab); learners can change it in the dialog.
 
 Supply `#| task: ...` for the assignment and optionally
 `#| feedback-context: context-id` for explicitly selected prose. Omitted feedback
