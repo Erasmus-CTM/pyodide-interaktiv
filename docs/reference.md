@@ -116,6 +116,8 @@ write a normal `{python}` cell instead and opt it into HTML with a
 #| label: fig-parabola
 #| fig-cap: "The parabola $y=x^2$."
 # pyodide: autorun, read-only=false
+import numpy as np
+import matplotlib.pyplot as plt
 x = np.linspace(-2, 2, 200)
 plt.plot(x, x**2)
 plt.show()
@@ -547,8 +549,9 @@ Install `ai-feedback` once in the project. The Pyodide filter loads it automatic
 no shared runtime is bundled here. Existing filter lists need no extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
-import in that dialog. `pyodide: feedback-storage: session` remains the default
-storage choice unless explicit shared configuration or saved settings override it.
+import in that dialog. `pyodide: feedback-storage:` (default `local`; `session`
+keeps settings for one tab) supplies the default storage choice unless explicit
+shared configuration or saved settings override it.
 
 Supply `#| task: ...` for the assignment and optionally
 `#| feedback-context: context-id` for explicitly selected prose. Omitted feedback

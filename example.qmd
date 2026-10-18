@@ -17,7 +17,8 @@ feedback set up on the page, you can receive the reply here instead.
 
 ## Print a total
 
-Complete the loop to add all the values and print their total.
+Complete the loop to add all the values and print their total, without using
+`sum()`.
 
 ```{pyodide-python}
 #| task: Use a loop to add all the values and print their total without using sum().
