@@ -7,7 +7,9 @@
 /* ---------------------------------------------------------------------- */
 /* Editor & console                                                       */
 
-.monaco-editor pre {
+/* Scoped to this extension's editors: other Monaco editors on the page
+   (py-exercise) keep their own look. */
+.qpyodide-editor .monaco-editor pre {
   background-color: unset !important;
 }
 
