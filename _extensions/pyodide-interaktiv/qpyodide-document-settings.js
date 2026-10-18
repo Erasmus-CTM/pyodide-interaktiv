@@ -26,6 +26,13 @@ globalThis.qpyodideCustomizedPyodideOptions = {
   }
 }
 
+// Interactive plot backend ----
+//
+// "webagg" (Pyodide 0.28+), "html5-canvas" (an older Pyodide pinned via
+// `pyodide: base-url:`) or "auto" (the base URL names no version; decided
+// from the loaded Pyodide). See qpyodide-canvas-plots.js.
+globalThis.qpyodideCanvasBackend = "{{CANVASBACKEND}}";
+
 // UI language for this render pass ----
 //
 // Set by the Lua filter from `pyodide: lang:` or Quartos own `lang:`.

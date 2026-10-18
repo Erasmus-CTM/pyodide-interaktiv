@@ -52,6 +52,39 @@ local baseUrl = "https://cdn.jsdelivr.net/pyodide/v".. baseVersionPyodide .."/"
 local buildVariant = "full/"
 local indexURL = baseUrl .. buildVariant
 
+-- Backend for interactive Matplotlib plots (qpyodide-canvas-plots.js).
+-- WebAgg needs the browser patch that Pyodide ships from 0.28 on; without it
+-- the backend needs a Tornado server, which Pyodide does not have. A project
+-- that pins an older Pyodide via `base-url:` therefore keeps the 1.6/1.7
+-- html5_canvas_backend path. "auto": the URL names no version (e.g. a
+-- self-hosted copy); the page then decides from the loaded Pyodide's version.
+local canvasBackend = "webagg"
+
+-- Major and minor version of the Pyodide release a base URL points to, e.g.
+-- https://cdn.jsdelivr.net/pyodide/v0.27.2/ or .../npm/pyodide@0.27.2/.
+-- nil if the URL names no version.
+local function pyodideVersionFromUrl(url)
+  local major, minor = url:match("/v(%d+)%.(%d+)%.%d+")
+  if not major then
+    major, minor = url:match("pyodide@(%d+)%.(%d+)%.%d+")
+  end
+  if not major then
+    return nil
+  end
+  return tonumber(major), tonumber(minor)
+end
+
+local function canvasBackendForUrl(url)
+  local major, minor = pyodideVersionFromUrl(url)
+  if major == nil then
+    return "auto"
+  end
+  if major == 0 and minor < 28 then
+    return "html5-canvas"
+  end
+  return "webagg"
+end
+
 -- Define user directory
 local homeDir = "/home/pyodide"
 
@@ -360,6 +393,7 @@ local function setPyodideInitializationOptions(meta)
   -- The base URL used for downloading Python WebAssembly binaries
   if isVariablePopulated(pyodide["base-url"]) then
     baseUrl = pandoc.utils.stringify(pyodide["base-url"])
+    canvasBackend = canvasBackendForUrl(baseUrl)
   end
 
   -- The build variant for Python WebAssembly binaries. Default: 'full'
@@ -480,6 +514,7 @@ local function initializationPyodide()
   -- Setup different Pyodide specific initialization variables
   local substitutions = {
     ["INDEXURL"] = indexURL,
+    ["CANVASBACKEND"] = canvasBackend,
     ["HOMEDIR"] = homeDir,
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,

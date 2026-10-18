@@ -6,6 +6,10 @@
 // by contrast, needs the browser DOM and therefore runs in a second Pyodide
 // instance on the main thread.
 //
+// WebAgg needs Pyodide 0.28 or later (the default). A project that pins an
+// older Pyodide via `pyodide: base-url:` keeps the html5_canvas_backend path
+// of pyodide-interaktiv 1.6/1.7 instead; see QPC_PY_BACKEND_HTML5_CANVAS.
+//
 // The interactive plot pipeline:
 //   1. The worker computes as before and additionally sends each open
 //      figure along as `pickle` bytes (Base64) with the PNG.
@@ -53,6 +57,12 @@ globalThis.qpyodideCanvasPlots = {
   // "idle" | "booting" | "ready" | "failed"
   status: "idle",
 
+  // Plot backend: "webagg" (Pyodide 0.28+) or "html5-canvas" (older Pyodide,
+  // pinned via `pyodide: base-url:`). Starts as what the Lua filter derived
+  // from the base URL ("auto" if the URL names no version) and is settled
+  // from the loaded Pyodide's own version once the instance is up.
+  backend: globalThis.qpyodideCanvasBackend || "auto",
+
   // Timing measurements for diagnostics in the browser console
   bootSeconds: null,
   renderSeconds: [],
@@ -63,23 +73,249 @@ globalThis.qpyodideCanvasPlots = {
 };
 
 // Python side of the second instance: enable the interactive backend and
-// define a restorer for the pickle bytes coming from the worker.
-const QPC_PY_SETUP = [
+// define a restorer for the pickle bytes coming from the worker. Assembled by
+// qpyodideCanvasSetup() from a header, one backend prelude and a shared part.
+const QPC_PY_HEADER = [
   "import base64, pickle",
   "import numpy as np",
   "import matplotlib",
-  "",
+  ""
+];
+
+// Pyodide 0.28 or later: Matplotlib's own WebAgg backend, patched by Pyodide.
+const QPC_PY_BACKEND_WEBAGG = [
   "# Pyodide 0.28+ patches Matplotlib's maintained WebAgg backend so it talks",
   "# directly to an in-page JavaScript client instead of a Tornado server.",
   "# It also honours document.pyodideMplTarget, which the JavaScript side sets",
   "# to the output element belonging to the cell currently being upgraded.",
   "matplotlib.use('webagg', force=True)",
   "import matplotlib.backends.backend_webagg as _qpc_webagg",
+  "",
+  "def _qpc_new_manager(num, fig):",
+  "    return _qpc_webagg.new_figure_manager_given_figure(num, fig)",
+  "",
+  "def _qpc_after_show(fig):",
+  "    pass      # WebAgg owns its event wiring and toolbar lifecycle",
+  ""
+];
+
+// Pyodide below 0.28 (pyodide-interaktiv 1.6/1.7 behaviour, kept unchanged for
+// projects that pin such a version via `pyodide: base-url:`). Without Pyodide
+// 0.28's patch, WebAgg needs a Tornado server, which Pyodide does not ship, so
+// these versions use matplotlib-pyodide's html5_canvas_backend instead.
+// In matplotlib-pyodide 0.2.3 (what Pyodide 0.27.2 ships), its interactive
+// layer is disabled upstream: the canvas classes are commented out of the
+// export block, canvas.manager_class is never set (which decides the manager
+// since matplotlib 3.6), and the mouse/keyboard listeners are commented out
+// because they call event methods matplotlib 3.8 removed. This prelude
+// restores all three, and builds a toolbar that survives Font Awesome's JS kit.
+// Frozen: new plot features go to the WebAgg path.
+const QPC_PY_BACKEND_HTML5_CANVAS = [
+  "# --- 1. Re-enable the HTML5 canvas backend --------------------------------",
+  "# In matplotlib-pyodide 0.2.3 (Pyodide 0.27.2), the HTML5 classes are",
+  "# commented out in the export block of html5_canvas_backend.py:",
+  "#     # FigureCanvas = FigureCanvasHTMLCanvas",
+  "#     FigureCanvas = FigureCanvasAggWasm",
+  "# Active is therefore the Agg variant, which only blits finished Agg pixels",
+  "# onto the canvas - i.e. exactly the same pixels as our worker PNG. The",
+  "# actual vector renderer (RendererHTMLCanvas) is never used. It was active",
+  "# in v0.2.0; the changelog says nothing about the removal. We reset it.",
+  "import matplotlib_pyodide.html5_canvas_backend as _qpc_h5",
+  "_qpc_h5._BackendHTMLCanvas.FigureCanvas  = _qpc_h5.FigureCanvasHTMLCanvas",
+  "_qpc_h5._BackendHTMLCanvas.FigureManager = _qpc_h5.FigureManagerHTMLCanvas",
+  "_qpc_h5.FigureCanvas  = _qpc_h5.FigureCanvasHTMLCanvas",
+  "_qpc_h5.FigureManager = _qpc_h5.FigureManagerHTMLCanvas",
+  "# Since matplotlib 3.6, canvas.manager_class decides which manager gets",
+  "# created; _Backend.FigureManager is no longer used. matplotlib-pyodide",
+  "# never sets manager_class - so otherwise only a bare FigureManagerBase is",
+  "# created, which doesn't build a toolbar, canvas.toolbar stays None, and",
+  "# show() silently skips the toolbar. The coordinate display also depends",
+  "# on this: NavigationToolbar2.__init__ sets canvas.toolbar and connects",
+  "# mouse_move, which writes the x/y values into the toolbar.",
+  "_qpc_h5.FigureCanvasHTMLCanvas.manager_class = _qpc_h5.FigureManagerHTMLCanvas",
+  "matplotlib.use('module://matplotlib_pyodide.html5_canvas_backend', force=True)",
+  "",
+  "# --- 2. Reconnect mouse and keyboard events --------------------------------",
+  "# In browser_backend.py, the add_event_listener lines for the rubberband",
+  "# canvas are commented out. The handlers that are there call",
+  "# canvas.motion_notify_event() / button_press_event() - methods that",
+  "# matplotlib removed in 3.8 (Pyodide 0.27.2 ships 3.8.4). That's presumably",
+  "# why they got commented out. So here are our own handlers using the",
+  "# current event API: Event(...)._process().",
+  "from matplotlib.backend_bases import KeyEvent, MouseEvent",
+  "from pyodide.ffi import create_proxy",
+  "",
+  "# Convert mouse coordinates ourselves. The original takes event.offsetX",
+  "# against the logical figure size and ignores devicePixelRatio as well as",
+  "# any CSS scaling of the canvas - the displayed x/y values would then be",
+  "# wrong under Windows scaling != 100% or when shrunk via max-width.",
+  "# Using getBoundingClientRect, it's correct in every case.",
+  "def _qpc_convert_mouse_event(self, event):",
+  "    width, height = self.get_width_height()",
+  "    rect = self.get_element('rubberband').getBoundingClientRect()",
+  "    sx = width / rect.width if rect.width else 1.0",
+  "    sy = height / rect.height if rect.height else 1.0",
+  "    x = (event.clientX - rect.left) * sx",
+  "    y = height - (event.clientY - rect.top) * sy",
+  "    button = event.button + 1",
+  "    if button == 3:",
+  "        event.preventDefault()",
+  "        event.stopPropagation()",
+  "    if button == 2:",
+  "        button = 3",
+  "    return x, y, button",
+  "",
+  "_qpc_h5.FigureCanvasHTMLCanvas._convert_mouse_event = _qpc_convert_mouse_event",
+  "",
+  "# Keep the event proxies alive: otherwise Pyodide frees them and the",
+  "# listener calls into nothing. Figures are kept alive in _qpc_keep (shared",
+  "# part): this backend's DOM ids are hex(id(canvas)), and CPython reuses the",
+  "# id() of a freed object - a new figure could otherwise get the id of an",
+  "# older, still-visible one and draw into its canvas.",
+  "_qpc_proxies = []",
+  "",
+  "def _qpc_wire_events(canvas):",
+  "    # The rubberband canvas sits on top and receives the events.",
+  "    rb = canvas.get_element('rubberband')",
+  "    if rb is None:",
+  "        return",
+  "",
+  "    def on_move(event):",
+  "        x, y, button = canvas._convert_mouse_event(event)",
+  "        MouseEvent('motion_notify_event', canvas, x, y, guiEvent=event)._process()",
+  "",
+  "    def on_down(event):",
+  "        x, y, button = canvas._convert_mouse_event(event)",
+  "        MouseEvent('button_press_event', canvas, x, y, button, guiEvent=event)._process()",
+  "",
+  "    def on_up(event):",
+  "        x, y, button = canvas._convert_mouse_event(event)",
+  "        MouseEvent('button_release_event', canvas, x, y, button, guiEvent=event)._process()",
+  "",
+  "    def on_enter(event):",
+  "        rb.focus()   # keyboard focus, so shortcuts like 'p' and 'o' work",
+  "",
+  "    def on_leave(event):",
+  "        rb.blur()",
+  "",
+  "    def on_keydown(event):",
+  "        KeyEvent('key_press_event', canvas,",
+  "                 canvas._convert_key_event(event), guiEvent=event)._process()",
+  "",
+  "    def on_keyup(event):",
+  "        KeyEvent('key_release_event', canvas,",
+  "                 canvas._convert_key_event(event), guiEvent=event)._process()",
+  "",
+  "    for name, handler in (('mousemove', on_move), ('mousedown', on_down),",
+  "                          ('mouseup', on_up), ('mouseenter', on_enter),",
+  "                          ('mouseleave', on_leave), ('keydown', on_keydown),",
+  "                          ('keyup', on_keyup)):",
+  "        proxy = create_proxy(handler)",
+  "        _qpc_proxies.append(proxy)",
+  "        rb.addEventListener(name, proxy)",
+  "",
+  "# --- 3. Font Awesome-safe toolbar buttons ----------------------------------",
+  "# matplotlib-pyodide puts the `fa`/`fa-<name>` icon classes directly onto the",
+  "# toolbar's <button> elements. This extension loads Font Awesome's JS build",
+  "# (the CSS build pulls webfonts that no `embed-resources` pass can inline),",
+  "# and that build REPLACES every element carrying an `fa` class with an inline",
+  "# <svg>, keeping the original only as an HTML comment. The icon still shows,",
+  "# but the button - and with it the click listener and the `:hover` rule - is",
+  "# gone: a toolbar that looks right and does nothing at all.",
+  "# So build the same toolbar here with the icon classes on a nested <i>:",
+  "# Font Awesome swaps that <i> for its <svg> and leaves the <button> alone.",
+  "from js import document as _qpc_document",
+  "from matplotlib_pyodide.browser_backend import _FONTAWESOME_ICONS, FILE_TYPES",
+  "from pyodide.ffi.wrappers import add_event_listener",
+  "",
+  "def _qpc_toolbar_get_element(self):",
+  "    div = _qpc_document.createElement('span')",
+  "    self._qpc_mode_buttons = {}",
+  "",
+  "    def add_spacer():",
+  "        span = _qpc_document.createElement('span')",
+  "        span.style.minWidth = '16px'",
+  "        span.textContent = chr(160)",
+  "        div.appendChild(span)",
+  "",
+  "    for _text, _tooltip, image_file, name_of_method in self.toolitems:",
+  "        if image_file not in _FONTAWESOME_ICONS:",
+  "            continue",
+  "        if image_file is None:",
+  "            add_spacer()",
+  "            continue",
+  "        button = _qpc_document.createElement('button')",
+  "        button.classList.add('matplotlib-toolbar-button')",
+  "        icon = _qpc_document.createElement('i')",
+  "        icon.classList.add('fa')",
+  "        icon.classList.add(_FONTAWESOME_ICONS[image_file])",
+  "        button.appendChild(icon)",
+  "        add_event_listener(button, 'click', getattr(self, name_of_method))",
+  "        if name_of_method in ('pan', 'zoom'):",
+  "            self._qpc_mode_buttons[name_of_method] = button",
+  "        div.appendChild(button)",
+  "",
+  "    # The download buttons show their format as text, no icon - the bare",
+  "    # `fa` class upstream also puts on them would only make Font Awesome",
+  "    # try to convert them too.",
+  "    for _fmt, _mimetype in sorted(FILE_TYPES.items()):",
+  "        button = _qpc_document.createElement('button')",
+  "        button.classList.add('matplotlib-toolbar-button')",
+  "        button.textContent = _fmt",
+  "        button.id = 'text'",
+  "        add_event_listener(button, 'click', self.ondownload)",
+  "        div.appendChild(button)",
+  "",
+  "    return div",
+  "",
+  "_qpc_h5.NavigationToolbar2HTMLCanvas.get_element = _qpc_toolbar_get_element",
+  "",
+  "# Pan and zoom are toggles, but no browser backend renders that state, so",
+  "# both buttons look the same whether the mode is on or off - there is no",
+  "# way to see whether dragging will move the plot or do nothing. Mark the",
+  "# active one with a class and let the stylesheet colour it. Wrapping the",
+  "# two methods (rather than the click handlers) also covers matplotlib's",
+  "# own 'p'/'o' keyboard shortcuts, which toggle the very same modes.",
+  "_QPC_ACTIVE_CLASS = 'qpyodide-toolbar-button-active'",
+  "_QPC_MODE_OWNER = {'pan/zoom': 'pan', 'zoom rect': 'zoom'}",
+  "",
+  "def _qpc_sync_mode_buttons(self):",
+  "    buttons = getattr(self, '_qpc_mode_buttons', None)",
+  "    if not buttons:",
+  "        return",
+  "    active = _QPC_MODE_OWNER.get(self.mode.value)",
+  "    for name, button in buttons.items():",
+  "        if name == active:",
+  "            button.classList.add(_QPC_ACTIVE_CLASS)",
+  "        else:",
+  "            button.classList.remove(_QPC_ACTIVE_CLASS)",
+  "",
+  "def _qpc_mode_toggle(method_name):",
+  "    original = getattr(_qpc_h5.NavigationToolbar2HTMLCanvas, method_name)",
+  "    def toggle(self, *args):",
+  "        original(self, *args)",
+  "        _qpc_sync_mode_buttons(self)",
+  "    setattr(_qpc_h5.NavigationToolbar2HTMLCanvas, method_name, toggle)",
+  "",
+  "for _qpc_name in ('pan', 'zoom'):",
+  "    _qpc_mode_toggle(_qpc_name)",
+  "",
+  "def _qpc_new_manager(num, fig):",
+  "    return plt._backend_mod.new_figure_manager_given_figure(num, fig)",
+  "",
+  "def _qpc_after_show(fig):",
+  "    _qpc_wire_events(fig.canvas)",
+  ""
+];
+
+// Shared by both backends. Each backend prelude defines _qpc_new_manager()
+// and _qpc_after_show().
+const QPC_PY_COMMON = [
   "from matplotlib import pyplot as plt",
   "import matplotlib._pylab_helpers as _qpc_helpers",
   "",
   "# Keep figures and cursor callbacks alive after they leave pyplot's global",
-  "# registry. WebAgg owns its event wiring and toolbar lifecycle.",
+  "# registry.",
   "_qpc_keep = []",
   "",
   "# --- Snapping cursor -------------------------------------------------------",
@@ -246,7 +482,7 @@ const QPC_PY_SETUP = [
   "    if not _qpc_helpers.Gcf.figs:",
   "        # The figure wasn't registered with pyplot in the worker (e.g.",
   "        # created directly via Figure()) -> create the manager ourselves.",
-  "        mgr = _qpc_webagg.new_figure_manager_given_figure(len(_qpc_keep) + 1, fig)",
+  "        mgr = _qpc_new_manager(len(_qpc_keep) + 1, fig)",
   "        _qpc_helpers.Gcf._set_new_active_manager(mgr)",
   "    # The worker PNG is created with bbox_inches='tight' - there, the image",
   "    # area grows around the labels. The canvas, by contrast, renders exactly",
@@ -264,6 +500,7 @@ const QPC_PY_SETUP = [
   "        _qpc_attach_snap(fig)",
   "    plt.show()",
   "    _qpc_keep.append(fig)",
+  "    _qpc_after_show(fig)",
   "    return True",
   "",
   "def _qpc_redraw(count):",
@@ -272,7 +509,29 @@ const QPC_PY_SETUP = [
   "        if hasattr(item, 'canvas'):",
   "            item.canvas.draw()",
   "    return True"
-].join("\n");
+];
+
+const QPC_PY_BACKENDS = {
+  "webagg": QPC_PY_BACKEND_WEBAGG,
+  "html5-canvas": QPC_PY_BACKEND_HTML5_CANVAS
+};
+
+/**
+ * Picks the plot backend for the Pyodide that actually loaded. WebAgg needs
+ * the browser patch that Pyodide ships from 0.28 on; older releases get the
+ * html5_canvas_backend path of pyodide-interaktiv 1.6/1.7. `configured` is
+ * what the Lua filter derived from `pyodide: base-url:` (globalThis.
+ * qpyodideCanvasBackend); it only decides when the version is unknown.
+ */
+function qpyodideCanvasBackendFor(version, configured) {
+  const m = /^(\d+)\.(\d+)/.exec(String(version || ""));
+  if (m) return (Number(m[1]) === 0 && Number(m[2]) < 28) ? "html5-canvas" : "webagg";
+  return Object.hasOwn(QPC_PY_BACKENDS, configured) ? configured : "webagg";
+}
+
+function qpyodideCanvasSetup(backend) {
+  return [...QPC_PY_HEADER, ...QPC_PY_BACKENDS[backend], ...QPC_PY_COMMON].join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // Load the second Pyodide instance (main thread)
@@ -305,13 +564,15 @@ function qpyodideCanvasEngine() {
     });
 
     await py.loadPackage("matplotlib");
-    await py.runPythonAsync(QPC_PY_SETUP);
+    state.backend = qpyodideCanvasBackendFor(py.version, state.backend);
+    await py.runPythonAsync(qpyodideCanvasSetup(state.backend));
 
     state.pyodide = py;
     state.status = "ready";
     state.bootSeconds = (performance.now() - started) / 1000;
     console.log(
-      "qpyodide: second Pyodide instance (canvas plots) ready after " +
+      "qpyodide: second Pyodide instance (canvas plots, " + state.backend +
+      " on Pyodide " + py.version + ") ready after " +
       state.bootSeconds.toFixed(1) + "s" + qpyodideCanvasMemoryNote()
     );
     return py;
@@ -425,6 +686,9 @@ globalThis.qpyodideCanvasUpgrade = async function (targetDiv, pickles, options) 
   // not layout.
   const figure = document.createElement("figure");
   figure.className = "qpyodide-canvas-figure";
+  if (globalThis.qpyodideCanvasPlots.backend === "html5-canvas") {
+    figure.classList.add("qpyodide-canvas-legacy");
+  }
   figure.hidden = true;
   targetDiv.appendChild(figure);
 

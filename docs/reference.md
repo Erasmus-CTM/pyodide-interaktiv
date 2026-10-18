@@ -71,7 +71,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
-  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/   # optional; WebAgg plots need Pyodide 0.28+
   build-variant: full
   show-startup-message: true
   feedback: true                 # show AI feedback buttons (default: true)
@@ -295,6 +295,30 @@ A cell run corresponds to a script run: figures that were never shown by
 the end are discarded. Otherwise they would pile up across repeated runs
 of the same cell, and a later `plt.show()` would output all of them at
 once.
+
+### Interactive plots and the Pyodide version
+
+Interactive plots use Matplotlib's WebAgg backend in a second Pyodide
+instance. WebAgg needs **Pyodide 0.28 or later**: from 0.28 on, Pyodide
+patches it to talk to the page directly; older releases would need a
+Tornado server, which Pyodide does not ship. The default (no `base-url`)
+is Pyodide 0.28.3.
+
+**Migration note (projects from 1.6/1.7 that pin `base-url`).** Earlier
+versions documented `base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/`.
+Such a project keeps building and keeps its interactive plots without
+changes: for a Pyodide below 0.28 the extension uses the 1.6/1.7 plot
+backend (matplotlib-pyodide's `html5_canvas_backend`) instead of WebAgg.
+That backend is frozen; toolbar and layout improvements are made for
+WebAgg only. To move to WebAgg, remove `base-url` or point it at Pyodide
+0.28 or later (e.g. `https://cdn.jsdelivr.net/pyodide/v0.28.3/`); note that
+a newer Pyodide also brings newer Python packages.
+
+The version is read from the URL (`/v0.27.2/` or `pyodide@0.27.2`). For a
+URL without a version, such as a self-hosted copy, the page picks the
+backend from the Pyodide it actually loads. The choice appears in the page
+as `qpyodideCanvasBackend` (`webagg`, `html5-canvas` or `auto`) and, after
+the first plot, in the browser console.
 
 ### Matplotlib regression page
 

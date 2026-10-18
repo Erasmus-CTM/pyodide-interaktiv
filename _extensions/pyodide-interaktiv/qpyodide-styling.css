@@ -896,6 +896,26 @@ body.quarto-dark .qpyodide-input-echo {
   display: none;
 }
 
+/* Pyodide below 0.28 (pinned via `pyodide: base-url:`): matplotlib-pyodide's
+   html5_canvas_backend, as in 1.6/1.7. See qpyodide-canvas-plots.js.
+   Its "window title" row ("Figure 1", ...) has no class of its own, only an
+   ID ending in "top" (FigureCanvasWasm.show()). */
+.qpyodide-canvas-legacy div[id$="top"] {
+  display: none;
+}
+
+/* Pan and zoom are toggles, but that backend renders no pressed state, so
+   the prelude keeps this class in sync with NavigationToolbar2.mode. The
+   :hover twin is needed because matplotlib-pyodide injects its own
+   `button.matplotlib-toolbar-button:hover` rule into <head> at runtime,
+   after this file, which would otherwise win on equal specificity. */
+button.matplotlib-toolbar-button.qpyodide-toolbar-button-active,
+button.matplotlib-toolbar-button.qpyodide-toolbar-button-active:hover {
+  color: #fff;
+  background: var(--bs-primary, #2780e3);
+  border-color: var(--bs-primary, #2780e3);
+}
+
 .qpyodide-editor-toolbar .qpyodide-feedback-gear {
   margin: 0;
   font-size: var(--ctm-button-font-size, .875rem);

@@ -75,3 +75,41 @@ test('feedback: false with an activity on the page keeps hidden callouts out of 
     assert.doesNotMatch(data, /SECRET SOLUTION/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Interactive plots: WebAgg needs Pyodide 0.28+. A 1.6 project pins v0.27.2
+// via base-url and must keep its interactive plots, on the 1.6 canvas backend.
+const backendOf = html => (html.match(/qpyodideCanvasBackend = "([^"]*)"/) || [])[1];
+const indexUrlOf = html => (html.match(/"indexURL": "([^"]*)"/) || [])[1];
+
+test('a 1.6 project pinning Pyodide 0.27.2 keeps interactive plots on the 1.6 canvas backend', { skip }, () => {
+  const dir = project();
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(indexUrlOf(r.html), /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v0\.27\.2\//);
+    assert.equal(backendOf(r.html), 'html5-canvas');
+    assert.match(r.html, /matplotlib_pyodide\.html5_canvas_backend/);
+    // Nothing to fix for the author: no warning about plots.
+    assert.doesNotMatch(r.stderr, /interactive plots/i);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('without base-url, plots use WebAgg on Pyodide 0.28.3', { skip }, () => {
+  const dir = project(undefined, text => text.replace(/^  base-url:.*\n/m, ''));
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(indexUrlOf(r.html), /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v0\.28\.3\//);
+    assert.equal(backendOf(r.html), 'webagg');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a base-url without a version leaves the backend to the loaded Pyodide', { skip }, () => {
+  const dir = project(undefined, text => text.replace(/^  base-url:.*$/m, '  base-url: /pyodide/'));
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(indexUrlOf(r.html), /^\/pyodide\//);
+    assert.equal(backendOf(r.html), 'auto');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
