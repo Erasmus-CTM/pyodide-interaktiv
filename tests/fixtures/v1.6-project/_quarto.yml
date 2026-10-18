@@ -1,0 +1,17 @@
+# A project as set up for pyodide-interaktiv 1.6 (main, built-in feedback),
+# using the options documented there. It must build unchanged.
+project:
+  type: default
+  render: [index.qmd]
+filters:
+  - Erasmus-CTM/pyodide-interaktiv
+pyodide:
+  base-url: https://cdn.jsdelivr.net/pyodide/v0.27.2/
+  build-variant: full
+  show-startup-message: true
+  feedback: true
+  feedback-storage: session
+  feedback-hints: true
+  pdf-fallback: false
+  local-storage: false
+  lang: de

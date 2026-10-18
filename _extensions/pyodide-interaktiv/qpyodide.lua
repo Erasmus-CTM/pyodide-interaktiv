@@ -1768,20 +1768,32 @@ local function stitchDocument(doc)
   return doc
 end
 
+-- Shared locator for ai-feedback and JSXGraph (feedback-loader.lua).
+local dependencies = nil
+local function deps()
+  dependencies = dependencies or dofile(quarto.utils.resolve_path("feedback-loader.lua"))
+  return dependencies
+end
+
 return {
   {
     Meta = setPyodideInitializationOptions
   },
   { Callout = function(c)
       if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
-        feedback = feedback or dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+        feedback = feedback or deps().feedback()
         return feedback.markCallout(c)
       end
       return c
     end },
   { Pandoc = function(doc)
-      if feedbackEnabled ~= "false" and quarto.doc.is_format("html") then
-        feedback = dofile(quarto.utils.resolve_path("feedback-loader.lua"))()
+      if not quarto.doc.is_format("html") then return doc end
+      -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback
+      -- shipped with this extension is installed together with it. A page
+      -- that uses a missing optional extension stops with the install command.
+      deps().requireUsed(doc, "pyodide-interaktiv")
+      if feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] then
+        feedback = feedback or deps().feedback()
         return feedback.prepare(doc)
       end
       return doc
