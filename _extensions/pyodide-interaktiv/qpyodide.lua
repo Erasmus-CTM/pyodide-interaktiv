@@ -382,7 +382,22 @@ local function resolveLang(meta)
   return "en"
 end
 
-local function setPyodideInitializationOptions(meta)
+-- The URL parts: the scripts load indexURL .. "pyodide.mjs", so both parts
+-- must end in "/". The documented `build-variant: full` (and a base-url typed
+-- without its trailing slash) would otherwise yield ".../fullpyodide.mjs".
+local function setIndexURL()
+  local function directory(part)
+    if part ~= "" and part:sub(-1) ~= "/" then
+      return part .. "/"
+    end
+    return part
+  end
+  indexURL = directory(baseUrl) .. directory(buildVariant)
+end
+
+-- `pyodide:` in formats other than HTML (PDF, docx, Markdown, ...): Quarto's
+-- merged map, read as before 1.9 (pdf-fallback and *-autoexec act there).
+local function setPyodideOptionsFromMeta(meta)
 
   -- Resolve the language first: it must also work for documents that have no
   -- `pyodide:` block at all, so this happens before the early return below.
@@ -408,16 +423,7 @@ local function setPyodideInitializationOptions(meta)
   end
 
   if isVariablePopulated(pyodide["build-variant"]) or isVariablePopulated(pyodide["base-url"]) then
-    -- The scripts load indexURL .. "pyodide.mjs", so both parts must end in
-    -- "/". The documented `build-variant: full` (and a base-url typed without
-    -- its trailing slash) would otherwise yield ".../fullpyodide.mjs".
-    local function directory(part)
-      if part ~= "" and part:sub(-1) ~= "/" then
-        return part .. "/"
-      end
-      return part
-    end
-    indexURL = directory(baseUrl) .. directory(buildVariant)
+    setIndexURL()
   end
 
   -- The WebAssembly user's home directory and initial working directory. Default: '/home/pyodide'
@@ -492,6 +498,52 @@ local function setPyodideInitializationOptions(meta)
   return meta
 end
 
+-- `pyodide:` on HTML pages (1.9): ctm-libs' settings reader combines the
+-- section key by key across _quarto.yml, profiles, _metadata.yml and the
+-- page (F-79), and stops the render for credential-like keys (A1). Every
+-- value keeps the meaning it had (step-3 design §18.2): the on/off options
+-- take true, false, 1 and 0; a value that broke the page's script before
+-- (`feedback: yes`) now warns once and uses the default. Empty values count
+-- as unset, as before.
+local function setPyodideOptionsFromSettings(meta)
+  lang = resolveLang(meta)
+  local S = ctm.settings
+  local function text(key)
+    local value = S.string("pyodide", key)
+    if value ~= nil and value ~= "" then return value end
+    return nil
+  end
+  local function onOff(key, default)
+    local value = S.get("pyodide", key)
+    if value == nil or value == "" then return default end
+    return (S.bool("pyodide", key, {loose = true, digits = true, default = default}))
+  end
+
+  local base, variant = text("base-url"), text("build-variant")
+  if base then
+    baseUrl = base
+    canvasBackend = canvasBackendForUrl(baseUrl)
+  end
+  if variant then buildVariant = variant end
+  if base or variant then setIndexURL() end
+  homeDir = text("home-dir") or homeDir
+  showStartUpMessage = tostring(onOff("show-startup-message", true))
+  feedbackEnabled = tostring(onOff("feedback", true))
+  feedbackHints = tostring(onOff("feedback-hints", true))
+  feedbackStorage = text("feedback-storage") or feedbackStorage
+  pdfFallback = text("pdf-fallback") or pdfFallback
+  localStorageEnabled = tostring(onOff("local-storage", false))
+  localStorageEpoch = text("local-storage-epoch") or localStorageEpoch
+  -- Only the active format's key is read (html-autoexec).
+  local autoexecKey = "html-autoexec"
+  if onOff(autoexecKey, false) then autoexecDocDefaults[autoexecKey] = "true" end
+  local packages = {}
+  for _, name in ipairs((S.list("pyodide", "packages"))) do
+    table.insert(packages, "'" .. name .. "'")
+  end
+  if #packages > 0 then installPythonPackagesList = table.concat(packages, ", ") end
+  return meta
+end
 
 -- Read a file that lives next to this .lua filter (resolved via Quarto's path API).
 local function readTemplateFile(template)
@@ -530,7 +582,7 @@ local function initializationPyodide()
   local substitutions = {
     ["INDEXURL"] = indexURL,
     ["CANVASBACKEND"] = canvasBackend,
-    ["HOMEDIR"] = homeDir,
+    ["HOMEDIR"] = jsStringEscape(homeDir),
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
     ["QPYODIDECELLDETAILS"] = cellDetails,
@@ -1820,17 +1872,41 @@ end
 
 local needFeedback = false
 
+-- What on the page concerns this extension: `{pyodide-python}` cells,
+-- `# pyodide:` marker cells and AI feedback activities.
+local function pageUses(doc)
+  local found = false
+  doc.blocks:walk({
+    CodeBlock = function(block)
+      if isPyodideCell(block) or (block.classes:includes("python") and select(2, extractPyodideMarker(block.text)) ~= nil) then found = true end
+    end,
+    Div = function(div) if div.classes:includes("ai-feedback") then found = true end end,
+  })
+  return found
+end
+
+local pageMeta = nil
 return {
-  {
-    Meta = setPyodideInitializationOptions
-  },
+  -- The Meta pass only records the page's metadata (N7): the settings are
+  -- read in the first Pandoc pass, and only on pages this extension serves.
+  { Meta = function(meta)
+      pageMeta = meta
+      ctm.settings.load(meta)
+      return meta
+    end },
   -- Feedback is on unless `pyodide: feedback: false`; AI feedback is part of
   -- ctm-libs. A page that uses JSXGraph without the extension stops with the
   -- install command. Decided before callouts are marked, so hidden callouts
-  -- never reach a feedback context.
+  -- never reach a feedback context. HTML pages without cells, marker cells
+  -- or activities read no settings and load nothing (E14).
   { Pandoc = function(doc)
-      if not quarto.doc.is_format("html") then return doc end
+      if not quarto.doc.is_format("html") then
+        setPyodideOptionsFromMeta(pageMeta or doc.meta)
+        return doc
+      end
       ctm.deps.requireUsed(doc, "pyodide-interaktiv")
+      if not pageUses(doc) then return doc end
+      setPyodideOptionsFromSettings(pageMeta or doc.meta)
       needFeedback = feedbackEnabled ~= "false" or ctm.deps.uses(doc)["ai-feedback"] == true
       return doc
     end },
