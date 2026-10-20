@@ -31,7 +31,9 @@ globalThis.qpyodideCellsReady = false;
 const qpyodideRestarted = (err) => !!(err && err.restarted);
 
 // The extra packages could not be loaded: the status line says so and offers
-// Retry, which repeats the missing steps without restarting Python.
+// Retry, which repeats the missing steps without restarting Python. The
+// reason is short (the package and the status); the console has the details.
+// A restart during Retry is no failure: the new start's follower takes over.
 function qpyodideShowSetupFailed(proxy, err) {
   const text = document.createElement("span");
   text.textContent = QP_L.setupFailed(String((err && err.message) || err));
@@ -43,7 +45,11 @@ function qpyodideShowSetupFailed(proxy, err) {
     qpyodideUpdateStatusHeaderSpinner(QP_L.workerInitPackages);
     proxy.retrySetup().then(
       () => qpyodideUpdateStatusHeader(QP_L.engineReady),
-      (again) => { if (!qpyodideRestarted(again)) qpyodideShowSetupFailed(proxy, again); });
+      (again) => {
+        if (qpyodideRestarted(again)) return;
+        console.warn("qpyodide: the extra packages could not be loaded", again);
+        qpyodideShowSetupFailed(proxy, again);
+      });
   });
   qpyodideStartupMessage.replaceChildren(text, " ", retry);
 }

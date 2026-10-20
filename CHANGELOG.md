@@ -30,7 +30,8 @@ whole install.
   This extension's cells look as before: "Ready" and Run once everything is
   loaded. The plot setup runs with the first cell run. If the extra packages
   cannot be loaded, the status line says that plots are not available and
-  that other Python code runs, with **Retry**, and cells run without them.
+  that other Python code works normally, with **Retry**, and cells run
+  without them.
   After Stop restarts Python (pages without cross-origin isolation), Run
   waits until the new start is ready, and the setup cells run again before
   any other startup cell.

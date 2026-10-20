@@ -3,7 +3,8 @@
 // cells follow the second stage; a failed second stage offers Retry and the
 // cells run without it; MPLBACKEND reaches the worker; a restart during the
 // second stage ends a waiting run (B1); after a restart Run waits for the new
-// start, and an interrupted startup run does not go on in the new worker (S3).
+// start, and an interrupted startup run does not go on in the new worker (S3);
+// a restart during Retry is no failure.
 // The same in a browser with real Pyodide: ctm-libs' tests/browser/worker.mjs
 // (the worker) and the umbrella's browser gate (the page).
 const test = require('node:test');
@@ -115,11 +116,11 @@ test('a failed stage 2: the status line names the effect and offers Retry; the c
   const p = page();
   const [worker] = p.workers;
   await p.stage1(0);
-  worker.reply({type: 'setup', ok: false, message: 'download failed: matplotlib.whl'});
+  worker.reply({type: 'setup', ok: false, message: 'matplotlib: HTTP 404'});
   await tick();
   assert.equal(p.w.qpyodideCellsReady, true, 'cells run without the extra packages');
   assert.ok(p.runButtons().every(button => !button.disabled));
-  const failed = p.w.QP_L.setupFailed('download failed: matplotlib.whl');
+  const failed = p.w.QP_L.setupFailed('matplotlib: HTTP 404');
   assert.equal(p.status(), failed + ' ' + p.w.QP_L.setupRetry);
   await drain(worker);
   assert.equal(p.runCells(worker).length, 3, 'the startup cells ran');
@@ -256,5 +257,28 @@ test('S3: a restart during an autorun cell stops the startup run after it; the n
   await drain(p.workers[1], 12);
   assert.deepEqual(p.runCells(p.workers[1]), ['SETUP_VALUE = 5', 'print("A")', 'print("B")']);
   assert.ok(p.runButtons().every(button => !button.disabled), 'Run is free again');
+  p.w.close();
+});
+
+test('a restart during Retry is no failure: no orange text, no Retry; the new start becomes ready', async () => {
+  const p = page();
+  await p.stage1(0);
+  p.workers[0].reply({type: 'setup', ok: false, message: 'matplotlib: HTTP 404'});
+  await tick();
+  p.w.document.querySelector('.qpyodide-button-retry').click();
+  assert.equal(p.workers[0].posted.at(-1).type, 'setupRetry');
+  assert.equal(p.status(), p.w.QP_L.workerInitPackages);
+  // A check's stop() while Retry is under way: the retried stage 2 rejects
+  // with error.restarted.
+  p.w.mainPyodide.restart('Stopped by a check.');
+  for (let i = 0; i < 4; i++) await tick();
+  assert.doesNotMatch(p.status(), /🟠|🔴/, 'a restart is no failure: ' + p.status());
+  assert.equal(p.w.document.querySelector('.qpyodide-button-retry'), null, 'no Retry');
+  assert.ok(p.runButtons().every(button => button.disabled), 'Run waits for the new start');
+  await p.stage1(1);
+  p.workers[1].reply({type: 'setup', ok: true});
+  await tick();
+  assert.equal(p.status(), p.w.QP_L.engineReady);
+  assert.ok(p.runButtons().every(button => !button.disabled));
   p.w.close();
 });
