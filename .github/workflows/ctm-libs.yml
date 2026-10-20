@@ -1,0 +1,44 @@
+name: Shipped ctm-libs and tests
+# The shipped copy of ctm-libs equals the ctm-libs commit it records
+# (.github/ctm-libs-source.json), byte for byte; then the tests run, against
+# that copy or against the review ctm-libs a head commit names.
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Read the commit of the shipped ctm-libs
+        id: shipped
+        run: echo "commit=$(python3 -c "import json;print(json.load(open('.github/ctm-libs-source.json'))['commit'])")" >> "$GITHUB_OUTPUT"
+      - name: Fetch that ctm-libs commit
+        uses: actions/checkout@v4
+        with:
+          repository: Erasmus-CTM/ctm-libs
+          ref: ${{ steps.shipped.outputs.commit }}
+          path: _ci/ctm-libs-shipped
+          persist-credentials: false
+      - name: The shipped _extensions/ctm-libs, ai-feedback and ctm-bootstrap.lua match the recorded commit
+        run: python3 scripts/sync-ctm-libs.py _ci/ctm-libs-shipped --check
+      - uses: ./.github/actions/review-ctm-libs
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: '1.8.27'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Report failing tests as annotations
+        if: failure()
+        run: |
+          text=$(grep -A30 'not ok' "$RUNNER_TEMP/test.log" | head -c 3500 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')
+          echo "::error title=Failing tests::$text"

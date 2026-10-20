@@ -1,6 +1,7 @@
 // Projects made for pyodide-interaktiv 1.6 (built-in feedback) build unchanged
 // after `quarto add Erasmus-CTM/pyodide-interaktiv`, which also installs the
-// ai-feedback shipped in this repository. Needs Quarto; skipped otherwise.
+// ctm-libs and the ai-feedback forwarder shipped in this repository. Needs
+// Quarto; skipped otherwise.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -14,7 +15,7 @@ const repo = path.join(__dirname, '..');
 
 // What `quarto add Erasmus-CTM/pyodide-interaktiv` installs: every extension
 // in the repository's _extensions/, under the owner folder.
-function project(extensions = ['pyodide-interaktiv', 'ai-feedback'], edit = text => text) {
+function project(extensions = ['pyodide-interaktiv', 'ctm-libs', 'ai-feedback'], edit = text => text) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyodide-old-project-'));
   fs.cpSync(path.join(__dirname, 'fixtures/v1.6-project'), dir, { recursive: true });
   for (const name of extensions) fs.cpSync(path.join(repo, '_extensions', name), path.join(dir, '_extensions/Erasmus-CTM', name), { recursive: true });
@@ -28,8 +29,9 @@ function render(dir) {
   return { ...r, html: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '' };
 }
 
-test('the repository ships ai-feedback, so the update installs it', () => {
-  assert.ok(fs.existsSync(path.join(repo, '_extensions/ai-feedback/_extension.yml')));
+test('the repository ships ctm-libs and the ai-feedback forwarder, so the update installs them', () => {
+  assert.ok(fs.existsSync(path.join(repo, '_extensions/ctm-libs/lua/ctm.lua')));
+  assert.ok(fs.existsSync(path.join(repo, '_extensions/ai-feedback/feedback-quarto.lua')));
 });
 
 test('a 1.6 project builds unchanged, with feedback and its settings', { skip }, () => {

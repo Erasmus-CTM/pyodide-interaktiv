@@ -9,7 +9,7 @@ function page({language='en', storage='session', hints=true, enabled=true, autos
   const dom = new JSDOM('<main></main>', {url:'https://course.invalid/examples.html', runScripts:'outside-only'});
   const w = dom.window;
   w.AbortController = AbortController; w.confirm=()=>true;
-  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(process.env.AI_FEEDBACK_EXTENSION || path.join(__dirname,'../_extensions/ai-feedback'),file),'utf8'));
+  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(process.env.CTM_LIBS_EXTENSION || path.join(__dirname,'../_extensions/ctm-libs'),'feedback',file),'utf8'));
   w.qpyodideLang = language;
   w.qpyodideFeedbackOptions = {enabled,hints,storage};
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-locales.js'),'utf8'));
