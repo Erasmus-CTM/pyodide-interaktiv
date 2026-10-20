@@ -234,3 +234,27 @@ test('a restart before stage 2 ends: no failure in the status line, and the star
   assert.deepEqual(p.runCells(p.workers[0]), []);
   p.w.close();
 });
+
+test('S3: a restart during an autorun cell stops the startup run after it; the new start runs every startup cell in order', async () => {
+  // runCode ends without throwing when the restart rejects its call, so the
+  // old startup run must notice the restart itself.
+  const p = page({cells: [
+    {id: 1, code: 'SETUP_VALUE = 5', options: {context: 'setup'}},
+    {id: 2, code: 'print("A")', options: {context: 'interactive', autorun: 'true'}},
+    {id: 3, code: 'print("B")', options: {context: 'interactive', autorun: 'true'}},
+  ]});
+  await p.stage1(0);
+  p.workers[0].reply({type: 'setup', ok: true});
+  await tick(); await tick();
+  p.workers[0].answer('runCell', {entries: [], images: []}, 0);
+  for (let i = 0; i < 4; i++) await tick();
+  assert.deepEqual(p.runCells(p.workers[0]), ['SETUP_VALUE = 5', 'print("A")']);
+  p.w.mainPyodide.restart('Stopped by a check.');
+  for (let i = 0; i < 4; i++) await tick();
+  await p.stage1(1);
+  p.workers[1].reply({type: 'setup', ok: true});
+  await drain(p.workers[1], 12);
+  assert.deepEqual(p.runCells(p.workers[1]), ['SETUP_VALUE = 5', 'print("A")', 'print("B")']);
+  assert.ok(p.runButtons().every(button => !button.disabled), 'Run is free again');
+  p.w.close();
+});
