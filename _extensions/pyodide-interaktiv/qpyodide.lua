@@ -48,15 +48,13 @@ local hasDonePyodideSetup = false
 -- Default values taken from:
 -- https://pyodide.org/en/stable/usage/api/js-api.html#globalThis.loadPyodide
 
--- Define a base compatibile version
-local baseVersionPyodide = "0.28.3"
-
--- Define where Pyodide can be found. Default:
--- https://cdn.jsdelivr.net/pyodide/v0.z.y/full/
--- https://cdn.jsdelivr.net/pyodide/v0.z.y/debug/
-local baseUrl = "https://cdn.jsdelivr.net/pyodide/v".. baseVersionPyodide .."/"
+-- Where Pyodide can be found: ctm-libs' one Pyodide constant (E12; checks and
+-- cells run on the same version), e.g.
+-- https://cdn.jsdelivr.net/pyodide/v0.28.3/full/; `pyodide: base-url:` and
+-- `build-variant:` still pin a project's own (e.g. .../v0.28.3/debug/).
+local indexURL = ctm.runtime.indexURL()
 local buildVariant = "full/"
-local indexURL = baseUrl .. buildVariant
+local baseUrl = indexURL:sub(-#buildVariant) == buildVariant and indexURL:sub(1, -#buildVariant - 1) or indexURL
 
 -- Backend for interactive Matplotlib plots (qpyodide-canvas-plots.js).
 -- WebAgg needs the browser patch that Pyodide ships from 0.28 on; without it
@@ -628,62 +626,14 @@ local function ensurePyodideSetup()
   -- Otherwise, let's include the initialization script _once_
   hasDonePyodideSetup = true
 
-  -- COI service worker: copy the file into the site root and register it in
-  -- the browser. Enables SharedArrayBuffer (and thus real input()) on HTTPS
-  -- hosts like GitHub Pages, without server-side COOP/COEP header config.
-  --
-  -- Important: io.open() with a relative path writes relative to the
-  -- directory of the document CURRENTLY being rendered, not to the project
-  -- root. In website projects with subfolders (e.g. Chapter_1/, Chapter_2/,
-  -- ...), the file would otherwise end up scattered across the source tree
-  -- (e.g. Qmd-Files/Chapter_1/coi-serviceworker.js) instead of in the actual
-  -- output directory. quarto.project.output_directory points to the active
-  -- profile's actual output directory (e.g. docs/de); writing there fixes
-  -- this. For standalone documents without a project (quarto.project is
-  -- then nil), the previous document-relative path remains as a fallback.
-  --
-  -- The `<script src="...">` reference must be relative, not root-absolute
-  -- (`/coi-serviceworker.js`): a root-absolute path resolves against the
-  -- filesystem root for a standalone document opened directly as a local
-  -- `file://`, which 404s every time. But a *plain* relative path (just
-  -- "coi-serviceworker.js") breaks the opposite way in a project with
-  -- chapters in subfolders: the file is written once, at the project output
-  -- root, while a nested chapter's own page resolves that same relative
-  -- reference against ITS OWN directory instead. Quarto's own
-  -- `quarto.project.offset` is exactly the relative path back from the
-  -- current page to the project root (measured: "." at the root, ".." one
-  -- level down, etc. -- always populated, even for a standalone document
-  -- with no project at all, where it is also "."). Prepending it makes the
-  -- reference correct at every nesting depth AND for a standalone document.
-  --
-  -- Measured exception that no path can fix: under `embed-resources: true`
-  -- Quarto inlines this script's whole content into the page, so the tag
-  -- has no `src` left at all. coi-serviceworker.js registers itself via
-  -- `document.currentScript.src`, which is "" for an inline script -- the
-  -- registration then resolves against the page itself and is rejected
-  -- (MIME `text/html`). Whatever this filter writes here is irrelevant in
-  -- that combination, and a service worker cannot be inlined or loaded
-  -- from a `data:` URI either way: browsers require a real, separate
-  -- same-origin script URL. So COI silently does not come up there; the
-  -- extension degrades gracefully without it (Stop still works, as a hard
-  -- worker restart -- see Known limitations).
-  local coiContent = readTemplateFile("coi-serviceworker.js")
-  if coiContent then
-    local coiPath = "coi-serviceworker.js"
-    if quarto.project and quarto.project.output_directory then
-      coiPath = quarto.project.output_directory .. "/coi-serviceworker.js"
-    end
-    local coiOut = io.open(coiPath, "w")
-    if coiOut then
-      coiOut:write(coiContent)
-      coiOut:close()
-    end
-  end
-  local coiOffset = "."
-  if quarto.project and isVariablePopulated(quarto.project.offset) then
-    coiOffset = quarto.project.offset
-  end
-  quarto.doc.include_text("in-header", '<script src="' .. coiOffset .. '/coi-serviceworker.js"></script>')
+  -- The Python worker (ctm-libs: CTMWorker) and coi-serviceworker.js, which
+  -- makes the page cross-origin isolated on hosts without COOP/COEP headers
+  -- (GitHub Pages), for input() and a graceful Stop: ctm-libs writes the file
+  -- once at the output root and loads it relative to the project root, as
+  -- this extension did. Under `embed-resources: true` the script is inlined
+  -- and cannot register itself; Python works without it (Stop restarts the
+  -- worker -- see Known limitations).
+  ctm.runtime.worker()
 
   local initializedConfigurationPyodide = initializationPyodide()
 
@@ -734,7 +684,9 @@ local function ensurePyodideSetup()
   includeFileInHTMLTag("in-header", "qpyodide-feedback.js", "module")
   includeFileInHTMLTag("in-header", "qpyodide-storage-settings.js", "module")
 
-  -- Insert JS routine to bring Pyodide online
+  -- This extension's part of the worker (runCell, plots, the input() prompt),
+  -- then the routine that brings Python online
+  includeFileInHTMLTag("in-header", "qpyodide-worker-plugin.js", "module")
   includeFileInHTMLTag("in-header", "qpyodide-document-engine-initialization.js", "module")
 
   -- Insert the interactive-plot module (second Pyodide instance on the main
