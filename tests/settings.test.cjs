@@ -3,7 +3,8 @@
 // reader, credential-like keys stop the render (A1), the on/off options keep
 // the meaning of true, false, 1 and 0, and a value that broke the page's
 // script before now warns and uses the default. PDF, docx and the other
-// formats read Quarto's merged map as before. Needs Quarto.
+// formats read Quarto's merged map as before; Markdown outputs show the cells
+// as Python source, with one warning. Needs Quarto.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -122,6 +123,27 @@ test('LaTeX/PDF: pdf-fallback (python) and pdf-autoexec from _quarto.yml reach t
   assert.doesNotMatch(fallback, /pyodide-python/);
   const run = fs.readFileSync(path.join(dir, 'run.tex'), 'utf8');
   assert.match(run, /\b42\b/, 'the cell ran at render time');
+}));
+
+test('Markdown output (gfm): the non-HTML path, cells as highlighted Python source, one build warning (AC, 20 Oct)', { skip }, () => withProject({
+  '_quarto.yml': yml(['cells.qmd', 'marker.qmd', 'none.qmd']),
+  'cells.qmd': '---\ntitle: t\n---\n' + CELL + '\n```{pyodide-python}\n#| context: setup\nSETUP_VALUE = 5\n```\n'
+    + '\n```{pyodide-python}\n#| include: false\nHIDDEN = 1\n```\n\n```{pyodide-python}\n#| pdf-fallback: false\nprint("ALWAYS")\n```\n',
+  'marker.qmd': '---\ntitle: t\nexecute:\n  enabled: false\n---\n\n```{python}\n# pyodide: true\nprint("MARKED")\n```\n',
+  'none.qmd': '---\ntitle: t\n---\n\nNo cells.\n',
+}, dir => {
+  const r = render(dir, ['--to', 'gfm']);
+  assert.equal(r.status, 0, r.stderr);
+  const warning = /pyodide-interaktiv: Markdown output shows this page's Pyodide cells as Python source; they run only in HTML output\./g;
+  assert.equal((r.stderr.match(warning) || []).length, 2, 'one warning for each page with cells, none for the page without: ' + r.stderr);
+  const cells = fs.readFileSync(path.join(dir, 'cells.md'), 'utf8');
+  for (const code of ['print(6 * 7)', 'SETUP_VALUE = 5', 'print("ALWAYS")']) assert.match(cells, new RegExp('``` ?python\\n' + code.replace(/[()*]/g, '\\$&') + '\\n```'), code);
+  assert.doesNotMatch(cells, /HIDDEN/, 'include: false shows nothing, as with pdf-fallback');
+  assert.doesNotMatch(cells, /<script|<noscript|qpyodide|pyodide-python|#\|/, 'no dead markup, no options left');
+  const marker = fs.readFileSync(path.join(dir, 'marker.md'), 'utf8');
+  assert.match(marker, /``` ?python\nprint\("MARKED"\)\n```/);
+  assert.doesNotMatch(marker, /# pyodide:|<script|qpyodide/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, 'none.md'), 'utf8'), /<script|qpyodide/);
 }));
 
 test('languages: pyodide: lang, ctm-assessment: lang, then lang; no and nn give Bokmål; noscript from the catalogue', { skip }, () => withProject({

@@ -60,4 +60,7 @@ whole install.
   `scripts/sync-ai-feedback.py`; CI reads review refs with the umbrella's
   `tools/ci/review-dependencies.py`. The tests read ctm-libs from
   `CTM_LIBS_EXTENSION` or the shipped copy.
-- Markdown output keeps the cell markup but no longer gets the scripts.
+- **Markdown output** (`format: gfm`, `commonmark`, …): cells show as
+  highlighted Python source, as with `pdf-fallback`, with one build warning
+  per page; before, the output carried the cells' scripts, which only work
+  where raw HTML is passed through.

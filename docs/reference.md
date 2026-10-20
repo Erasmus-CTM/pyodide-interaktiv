@@ -57,7 +57,7 @@ Can be disabled via `feedback-hints: false`.
 | `read-only` | `false` | make the editor read-only (no Feedback button) |
 | `autorun` | — | `true`: run the code automatically after Pyodide starts |
 | `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
-| `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset |
+| `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset. Markdown outputs always show the source |
 | `<format>-autoexec` | — | `true`: for that one output format (e.g. `pdf-autoexec`, `html-autoexec`), actually *run* the cell via a local `python3`/`python` and show its real output instead of the interactive editor/`pdf-fallback`. Falls back to the document's `pyodide: <format>-autoexec:` when unset |
 | `label` | — | unique ID of the cell (`data-id` attribute) |
 | `classes` | — | additional CSS classes |
@@ -485,8 +485,10 @@ extra packages may still be loading (`proxy.whenSetup` resolves after them).
   does not keep the 6.7 MB matplotlib wheel in its in-memory cache, and with
   the cache switched off in the developer tools nothing is kept; then a
   check started early can wait for that download.
-- Markdown output (`format: gfm`, …) keeps the cells' markup and settings
-  but not the scripts (HTML dependencies are HTML-only).
+- Markdown output (`format: gfm`, `commonmark`, …) shows the cells as
+  highlighted Python source, as `pdf-fallback` does, whatever `pdf-fallback`
+  says, with one build warning per page: the cells need the page's scripts,
+  which only HTML output carries.
 - `embed-resources: true` gives a single working file, but not an offline
   one. The extension's own assets (Monaco, Font Awesome, the CSS and JS)
   are inlined, so icons and the editor come up with no external files – but

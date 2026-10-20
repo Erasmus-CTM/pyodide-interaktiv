@@ -1557,6 +1557,15 @@ local function buildInteractiveCell(cellCode, markerOptions)
   return reservePendingCell(cellCode, cellOptions)
 end
 
+-- The interactive cells need the page's scripts, which only HTML output
+-- carries (HTML dependencies are HTML-only). Markdown outputs (gfm,
+-- commonmark, ...) take the non-HTML path: their cells are always shown as
+-- highlighted Python source, as `pdf-fallback` shows them, and the first
+-- Pandoc pass warns once.
+local function interactiveFormat()
+  return quarto.doc.is_format("html")
+end
+
 -- Handle a marked `{python}` CodeBlock that reaches the CodeBlock filter
 -- still carrying its marker -- meaning no wrapping `.cell` Div consumed it
 -- first (handleMarkedCellDiv() runs as its own pass before this one), so
@@ -1574,7 +1583,7 @@ local function enableMarkedPythonCodeCell(el)
     return nil
   end
 
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  if not interactiveFormat() then
     return pandoc.CodeBlock(cellCode, el.attr)
   end
 
@@ -1621,7 +1630,7 @@ local function enablePyodideCodeCell(el)
 
   -- Map `echo`/`include` onto this extension's own interactive/output/setup
   -- cell kinds (see qpyodide-cell-classes.js) for the interactive HTML/
-  -- markdown path below, the same way real Quarto's `echo`/`include`
+  -- path below, the same way real Quarto's `echo`/`include`
   -- decide what a real, executed cell shows: `include: false` -> "setup"
   -- (runs invisibly at startup, output discarded -- nothing shown at all),
   -- `echo: false` -> "output" (runs automatically at startup, shows only
@@ -1695,7 +1704,7 @@ local function enablePyodideCodeCell(el)
     --
     -- Interactive formats keep their normal handling: there the Pyodide
     -- editor below is the better degraded state, not static source.
-    if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+    if not interactiveFormat() then
       -- Nothing ran, so there is no output left to show once the source
       -- is hidden -- `echo: false` ends up the same as `include: false`.
       if not includeEnabled or not echoEnabled then
@@ -1715,14 +1724,15 @@ local function enablePyodideCodeCell(el)
   -- source as normal, properly highlighted Python instead of the raw,
   -- unstyled `{pyodide-python}` block; the `#|` cell-option comments that
   -- a real Python engine would otherwise have hidden are stripped either
-  -- way. Off by default: the block passes through unchanged.
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  -- way. Off by default: the block passes through unchanged. Markdown
+  -- outputs always show the source (see interactiveFormat()).
+  if not interactiveFormat() then
     local fallback = pdfFallback
     if isVariablePopulated(cellOptions["pdf-fallback"]) then
       fallback = cellOptions["pdf-fallback"]
     end
 
-    if isPdfFallbackEnabled(fallback) then
+    if isPdfFallbackEnabled(fallback) or quarto.doc.is_format("markdown") then
       -- This path never actually executes the cell (no autoexec here), so
       -- there is no separate output to fall back to once the source is
       -- hidden -- `echo: false` therefore has nothing left to show either,
@@ -1786,7 +1796,7 @@ local function handleMarkedCellDiv(el)
   -- Non-interactive formats (PDF, docx, ...): the engine already produced
   -- the real output, crossrefs and all -- only the marker line itself has
   -- to disappear from the displayed source.
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  if not interactiveFormat() then
     el.content[codeIndex] = pandoc.CodeBlock(cellCode, el.content[codeIndex].attr)
     return el
   end
@@ -1881,6 +1891,10 @@ return {
   { Pandoc = function(doc)
       if not quarto.doc.is_format("html") then
         setPyodideOptionsFromMeta(pageMeta or doc.meta)
+        if quarto.doc.is_format("markdown") and select(2, pageUses(doc)) then
+          quarto.log.warning("pyodide-interaktiv: Markdown output shows this page's Pyodide cells as Python source; "
+            .. "they run only in HTML output.")
+        end
         return doc
       end
       ctm.deps.requireUsed(doc, "pyodide-interaktiv")
