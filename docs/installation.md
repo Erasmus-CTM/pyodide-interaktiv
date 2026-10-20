@@ -10,15 +10,32 @@ These examples currently use the integration preview:
 quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration
 ```
 
-This also installs the shared ai-feedback extension that AI feedback uses: the
-repository ships a copy of it (`_extensions/ai-feedback`, recorded in
-`.github/ai-feedback-source.json`), so projects made for earlier versions with
-built-in feedback build unchanged after the update. Feedback is on unless
-`pyodide: feedback: false`; with it off, ai-feedback is loaded only for pages
-with `::: {.ai-feedback}` activities. A page that
-uses an optional extension that is not installed (`::: {.ai-feedback}`
-activities without ai-feedback, `.jsxgraph` boards without JSXGraph) stops
-rendering with the install command.
+This installs three folders under `_extensions/Erasmus-CTM/`: the extension,
+**ctm-libs** (the library of CTM Assessment, which pyodide-interaktiv runs on:
+settings, languages, the Python worker, AI feedback) and an **ai-feedback**
+forwarder. The repository ships a generated copy of ctm-libs
+(`_extensions/ctm-libs`, recorded in `.github/ctm-libs-source.json`), so
+this one command stays the whole install, and projects made for earlier
+versions build unchanged after the update. Feedback is on unless
+`pyodide: feedback: false`. A page that uses JSXGraph boards (`.jsxgraph`)
+without the JSXGraph extension stops rendering with the install command.
+
+Projects that commit `_extensions/`, or allow only
+`_extensions/Erasmus-CTM/pyodide-interaktiv` in `.gitignore` (for example
+`!_extensions/*/*/*`), add `ctm-libs` and `ai-feedback` too: without
+ctm-libs next to the extension the render stops with
+`Install pyodide-interaktiv again: quarto add Erasmus-CTM/pyodide-interaktiv`.
+
+**Projects set up for 1.8 or earlier** kept an `ai-feedback` 0.8.1 folder.
+`quarto add Erasmus-CTM/pyodide-interaktiv` replaces it with the forwarder:
+`filters: [ai-feedback, ...]` keeps working, with one warning (list only
+`Erasmus-CTM/pyodide-interaktiv`). A page that lists a 0.8.1 folder that was
+not replaced stops with "remove ai-feedback from filters: and delete the old
+folder".
+
+**Inside CTM Assessment** (`filters: [ctm-assessment]`) the package's own
+ctm-libs serves every component; the copy shipped here is not used. A page
+that would combine two ctm-libs versions stops.
 
 **Quarto 1.10:** this release sends pages with blocks such as
 `{math-exercise}`, `{py-exercise}` or `{pyodide-python}` to Jupyter (an
@@ -38,7 +55,7 @@ filters:
 
 ## Feedback setup
 
-For feedback directly on the page, follow the [shared connection guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/installation.md#provider-settings-and-data-sent). Without a connection, Feedback prepares a message to copy into an AI chat.
+For feedback directly on the page, follow the [shared connection guide](https://github.com/Erasmus-CTM/ctm-libs/blob/main/docs/installation.md#provider-settings-and-data-sent). Without a connection, Feedback prepares a message to copy into an AI chat.
 
 ## Enable feedback in an HTML page
 
@@ -52,20 +69,19 @@ pyodide:
 
 Add a `#| task:` line to each exercise so feedback knows what students are being asked to do.
 
-`quarto add Erasmus-CTM/pyodide-interaktiv` and `quarto add Erasmus-CTM/ai-feedback`
-write the same folder, `_extensions/Erasmus-CTM/ai-feedback`; the command run
-last decides its version. Update pyodide-interaktiv after ai-feedback, or run
-both again, if you need a particular ai-feedback version.
+## Maintaining the shipped ctm-libs
 
-## Maintaining the shipped ai-feedback
-
-The copy in `_extensions/ai-feedback` is generated, never edited by hand.
-Update it from an ai-feedback checkout at the commit to ship:
+The copies in `_extensions/ctm-libs`, `_extensions/ai-feedback` and
+`_extensions/pyodide-interaktiv/ctm-bootstrap.lua` are generated from a
+ctm-libs commit, never edited by hand:
 
 ```sh
-python scripts/sync-ai-feedback.py ../ai-feedback
+python scripts/sync-ctm-libs.py ../ctm-libs          # a ctm-libs checkout at the commit to ship
 ```
 
-CI checks that the copy equals the recorded commit. This is a temporary
-arrangement for existing projects, to be revisited with the maintainers; the
-CTM Assessment package ignores this copy and uses its own pinned ai-feedback.
+CI (`ctm-libs.yml`) checks that they equal the recorded commit, byte for
+byte. Every consolidation pull request syncs them to the ctm-libs commit
+that CTM Assessment pins; a lag between pull requests is allowed. A review
+commit may name another ctm-libs commit in a `CTM-Review-Refs` trailer
+(`{"ctm-libs": "<sha>"}`): CI then builds and tests against it, read by the
+umbrella's `tools/ci/review-dependencies.py`.

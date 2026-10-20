@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - issue-1-webagg
+      - feature/shared-feedback-integration
   pull_request:
 
 permissions:
