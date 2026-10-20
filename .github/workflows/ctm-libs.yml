@@ -42,6 +42,13 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
+      # Test files render in parallel; their first `quarto run` (ctm-libs'
+      # settings reader) and first HTML render fill Quarto's caches, which
+      # parallel first uses race for. Fill them once.
+      - name: Prepare Quarto's caches
+        run: |
+          echo 'console.log("ready")' > "$RUNNER_TEMP/ready.ts" && quarto run "$RUNNER_TEMP/ready.ts"
+          printf -- '---\ntitle: ready\n---\n\nReady.\n' > "$RUNNER_TEMP/ready.qmd" && quarto render "$RUNNER_TEMP/ready.qmd" --to html
       - name: npm test
         run: |
           set -o pipefail
