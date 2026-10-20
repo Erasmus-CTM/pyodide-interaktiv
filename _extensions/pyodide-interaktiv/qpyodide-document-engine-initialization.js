@@ -26,6 +26,24 @@
 
 globalThis.qpyodideCellsReady = false;
 
+// The extra packages could not be loaded: the status line says so and offers
+// Retry, which repeats the missing steps without restarting Python.
+function qpyodideShowSetupFailed(proxy, err) {
+  const text = document.createElement("span");
+  text.textContent = QP_L.setupFailed(String((err && err.message) || err));
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "btn btn-default qpyodide-button qpyodide-button-retry";
+  retry.textContent = QP_L.setupRetry;
+  retry.addEventListener("click", () => {
+    qpyodideUpdateStatusHeaderSpinner(QP_L.workerInitPackages);
+    proxy.retrySetup().then(
+      () => qpyodideUpdateStatusHeader(QP_L.engineReady),
+      (again) => qpyodideShowSetupFailed(proxy, again));
+  });
+  qpyodideStartupMessage.replaceChildren(text, " ", retry);
+}
+
 // Follows one start of the worker (the page's first, and each restart).
 async function qpyodideFollowWorker(started, afterRestart) {
   globalThis.qpyodideCellsReady = false;
@@ -39,15 +57,23 @@ async function qpyodideFollowWorker(started, afterRestart) {
     return;
   }
 
+  let failure = null;
   try {
     await proxy.whenSetup;
   } catch (err) {
+    failure = err;
     console.warn("qpyodide: the extra packages could not be loaded", err);
   }
 
+  // The cells run either way: code without matplotlib works, and a cell that
+  // imports it shows the error in its output.
   globalThis.qpyodideCellsReady = true;
   qpyodideSetInteractiveButtonState(QP_L.runLabel, true);
-  qpyodideUpdateStatusHeader(QP_L.engineReady);
+  if (failure) {
+    qpyodideShowSetupFailed(proxy, failure);
+  } else {
+    qpyodideUpdateStatusHeader(QP_L.engineReady);
+  }
 
   const elapsed = (performance.now() - timerStart) / 1000;
   console.log(`qpyodide: Pyodide worker ready after ${elapsed.toFixed(1)}s`);

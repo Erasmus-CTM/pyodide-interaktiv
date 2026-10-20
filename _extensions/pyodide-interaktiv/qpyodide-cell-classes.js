@@ -120,6 +120,10 @@ function qpyodideSetRunButtonsEnabled(enabled) {
  */
 async function qpyodideExecutePython(code, wantPickle) {
   const pyodide = await qpyodideReady;
+  // This extension's cells run once the extra packages are there (D2), or
+  // without them when they failed; they wait here, before the worker's
+  // queue, so the queue never waits for them.
+  await pyodide.whenSetup?.catch(() => {});
   const result = await pyodide.runCell(code, wantPickle);
   result.text = result.entries.map((entry) => entry.message).join("\n");
   return result;
@@ -321,7 +325,7 @@ class EditorUnit {
     this.runButton.type = "button";
     this.runButton.id = `qpyodide-button-run-${uid}`;
     this.runButton.title = QP_L.runTitle;
-    if (globalThis.mainPyodide) {
+    if (globalThis.qpyodideCellsReady) {
       this.runButton.innerHTML = QP_L.runLabel;
       this.runButton.disabled = false;
     } else {
@@ -757,12 +761,11 @@ class EditorUnit {
     }
 
     // Keep the input() gate current: on state changes (input() checked/enabled)
-    // and once as soon as the Pyodide runtime is ready.
+    // and as soon as this extension's cells may run.
     window.addEventListener("qpyodide-runtime-restart", () => thiz.invalidateFeedback({preserveRunOutput: true}));
     window.addEventListener("qpyodide-input-state", () => thiz.updateInputGate());
-    if (globalThis.qpyodideReady) {
-      globalThis.qpyodideReady.then(() => thiz.updateInputGate()).catch(() => {});
-    }
+    window.addEventListener("qpyodide-cells-ready", () => thiz.updateInputGate());
+    if (globalThis.qpyodideCellsReady) thiz.updateInputGate();
   }
 
   invalidateFeedback({preserveRunOutput = false} = {}) {
@@ -807,9 +810,9 @@ class EditorUnit {
 
     const blocked = needsInput && !available;
 
-    // Only touch the Run button when Python is ready and nothing is
+    // Only touch the Run button when the cells may run and nothing is
     // currently running – otherwise we'd overwrite the loading or stop state.
-    if (globalThis.mainPyodide && !qpyodideExecutionBusy) {
+    if (globalThis.qpyodideCellsReady && !qpyodideExecutionBusy) {
       this.runButton.disabled = blocked;
       this.runButton.title = blocked
         ? QP_L.runTitleBlocked

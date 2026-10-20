@@ -2,7 +2,7 @@
 //
 // Builds the matching cell for every code block collected by the Lua filter
 // (see qpyodide-cell-classes.js) and runs the setup/output/autorun cells
-// after Pyodide starts.
+// once the cells may run.
 
 qpyodideCellDetails.forEach((entry) => {
   qpyodideCellContainer.addCell(qpyodideCreateCell(entry));
@@ -23,6 +23,11 @@ document.getElementById("quarto-show-all-code")
 document.getElementById("quarto-hide-all-code")
   ?.addEventListener("click", () => qpyodideToggleAllFolds(false));
 
-qpyodideReady
+// The startup cells run once this extension's cells may run (after the
+// extra packages, D2; qpyodide-document-engine-initialization.js).
+new Promise((resolve) => {
+  if (globalThis.qpyodideCellsReady) resolve();
+  else window.addEventListener("qpyodide-cells-ready", resolve, { once: true });
+})
   .then(() => qpyodideCellContainer.runStartupCells())
   .catch((err) => console.error("qpyodide: startup phase failed", err));
