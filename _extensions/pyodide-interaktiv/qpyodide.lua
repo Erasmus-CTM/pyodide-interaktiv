@@ -302,6 +302,28 @@ function table.clone(original)
   return shallowcopy(original)
 end
 
+-- P22 / E3: AI feedback is off for this build (ai-feedback: enabled: false,
+-- CTM_FEEDBACK=off). Then a cell gets no AI-only fields: neither the
+-- options task, feedback-policy and feedback-context (their empty defaults
+-- included) nor the policy selection and learning context. A cell with
+-- `#| task:` stays an ordinary runnable cell. The policy name is still
+-- checked, so both builds fail alike.
+local aiOff = false
+local AI_ONLY_OPTIONS = {"task", "feedback-policy", "feedback-context"}
+local function withoutAiOnly(options)
+  if aiOff then
+    for _, key in ipairs(AI_ONLY_OPTIONS) do options[key] = nil end
+  end
+  return options
+end
+local function addFeedbackFields(block, options, contextBlock)
+  if not feedback then return end
+  local selection = feedback.selection(block, options)
+  if aiOff then return end
+  options.policySelection = selection
+  options.feedbackContext = feedback.context(contextBlock or block, options, true)
+end
+
 local function mergeCellOptions(localOptions)
   -- Copy default options to the mergedOptions table
   local mergedOptions = table.clone(qPyodideDefaultCellOptions)
@@ -467,6 +489,11 @@ local function setPyodideOptionsFromMeta(meta)
   return meta
 end
 
+local pageHasCells = false
+-- pyodide: feedback, whatever the build: the cells' policy names are checked
+-- in both builds (feedback.selection), so both fail alike.
+local feedbackWanted = true
+
 -- `pyodide:` on HTML pages (1.9): ctm-libs' settings reader combines the
 -- section key by key across _quarto.yml, profiles, _metadata.yml and the
 -- page (F-79), and stops the render for credential-like keys (A1). Every
@@ -497,7 +524,21 @@ local function setPyodideOptionsFromSettings(meta)
   if base or variant then setIndexURL() end
   homeDir = text("home-dir") or homeDir
   showStartUpMessage = tostring(onOff("show-startup-message", true))
-  feedbackEnabled = tostring(onOff("feedback", true))
+  -- Feedback is on unless pyodide: feedback: false, and only in builds with
+  -- AI feedback (P22, asked directly: no dependence on the filter order). An
+  -- explicit pyodide: feedback: true on a page with cells is a request, which
+  -- a build without AI feedback names in its message once; the default is
+  -- no request.
+  local wanted = onOff("feedback", true)
+  feedbackWanted = wanted
+  local explicit, origin = S.get("pyodide", "feedback")
+  if wanted and explicit ~= nil and pageHasCells then
+    wanted = ctm.feedback.request("pyodide-interaktiv", true, "pyodide: feedback: true" .. (origin and (" in " .. origin) or ""))
+  elseif wanted then
+    wanted = ctm.feedback.enabled()
+  end
+  aiOff = not ctm.feedback.enabled()
+  feedbackEnabled = tostring(wanted)
   feedbackHints = tostring(onOff("feedback-hints", true))
   feedbackStorage = text("feedback-storage") or feedbackStorage
   pdfFallback = text("pdf-fallback") or pdfFallback
@@ -867,10 +908,10 @@ local function extractCodeBlockOptions(block)
     end
   end
 
-  if feedback then cellOptions.policySelection = feedback.selection(block, cellOptions); cellOptions["feedbackContext"] = feedback.context(block, cellOptions, true) end
+  addFeedbackFields(block, cellOptions)
   if cellOptions.context and cellOptions.context ~= "setup" and cellOptions.context ~= "output" and cellOptions.context ~= "interactive" then cellOptions.context = "" end
   -- Merge cell options with default options
-  cellOptions = mergeCellOptions(cellOptions)
+  cellOptions = withoutAiOnly(mergeCellOptions(cellOptions))
 
   -- Set the codeblock text to exclude the special comments.
   cellCode = table.concat(newCodeLines, '\n')
@@ -1508,7 +1549,7 @@ end
 -- Register one marked cell as an interactive Pyodide cell and hand back a
 -- placeholder for its insertion point -- see reservePendingCell() above.
 local function buildInteractiveCell(cellCode, markerOptions)
-  local cellOptions = mergeCellOptions(markerOptions)
+  local cellOptions = withoutAiOnly(mergeCellOptions(markerOptions))
   cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
   return reservePendingCell(cellCode, cellOptions)
 end
@@ -1534,7 +1575,7 @@ local function enableMarkedPythonCodeCell(el)
     return pandoc.CodeBlock(cellCode, el.attr)
   end
 
-  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el, markerOptions, true) end
+  addFeedbackFields(el, markerOptions)
   return buildInteractiveCell(cellCode, markerOptions)
 end
 
@@ -1759,7 +1800,7 @@ local function handleMarkedCellDiv(el)
       el:walk({Div=recover, Figure=recover, Image=recover, Span=recover})
     end
   end
-  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
+  addFeedbackFields(el, markerOptions, el.content[codeIndex])
   local insertion = buildInteractiveCell(cellCode, markerOptions)
 
   -- Keep Quarto's own figure float (and with it the caption and the
@@ -1810,14 +1851,14 @@ local needFeedback = false
 -- What on the page concerns this extension: `{pyodide-python}` cells,
 -- `# pyodide:` marker cells and AI feedback activities.
 local function pageUses(doc)
-  local found = false
+  local found, cells = false, false
   doc.blocks:walk({
     CodeBlock = function(block)
-      if isPyodideCell(block) or (block.classes:includes("python") and select(2, extractPyodideMarker(block.text)) ~= nil) then found = true end
+      if isPyodideCell(block) or (block.classes:includes("python") and select(2, extractPyodideMarker(block.text)) ~= nil) then found = true; cells = true end
     end,
     Div = function(div) if div.classes:includes("ai-feedback") then found = true end end,
   })
-  return found
+  return found, cells
 end
 
 local pageMeta = nil
@@ -1840,9 +1881,11 @@ return {
         return doc
       end
       ctm.deps.requireUsed(doc, "pyodide-interaktiv")
-      if not pageUses(doc) then return doc end
+      local uses, cells = pageUses(doc)
+      if not uses then return doc end
+      pageHasCells = cells
       setPyodideOptionsFromSettings(pageMeta or doc.meta)
-      needFeedback = feedbackEnabled ~= "false" or ctm.deps.uses(doc)["ai-feedback"] == true
+      needFeedback = feedbackWanted or ctm.deps.uses(doc)["ai-feedback"] == true
       return doc
     end },
   { Callout = function(c)
@@ -1886,5 +1929,13 @@ return {
   },
   {
     Pandoc = stitchDocument
-  }
+  },
+  -- The page's build message without AI feedback (P22): inside the CTM
+  -- Assessment package ctm-libs' end filter prints it after every component;
+  -- on its own this extension prints it here, as its last pass.
+  { Pandoc = function(doc)
+      local loaded = rawget(ctm, "feedback")
+      if loaded and not rawget(_G, "__ctmLibsEnd") then loaded.flush() end
+      return doc
+    end }
 }
