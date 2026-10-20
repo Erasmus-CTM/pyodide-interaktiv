@@ -91,7 +91,10 @@ test('a 1.6 project pinning Pyodide 0.27.2 keeps interactive plots on the 1.6 ca
     // `build-variant: full` (as documented) must still give a directory URL.
     assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/');
     assert.equal(backendOf(r.html), 'html5-canvas');
-    assert.match(r.html, /matplotlib_pyodide\.html5_canvas_backend/);
+    // The interactive-plot module is a cacheable file next to the page (D1).
+    const plots = r.html.match(/src="([^"]*\/qpyodide-canvas-plots\.js)"/);
+    assert.ok(plots, 'qpyodide-canvas-plots.js is loaded');
+    assert.match(fs.readFileSync(path.join(dir, plots[1]), 'utf8'), /matplotlib_pyodide\.html5_canvas_backend/);
     // Nothing to fix for the author: no warning about plots.
     assert.doesNotMatch(r.stderr, /interactive plots/i);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

@@ -12,20 +12,23 @@ local feedback = nil
 --- provider-neutral AI feedback (OpenAI-compatible APIs).
 ---
 --- The filter collects all `{pyodide-python}` code blocks, replaces them with
---- insertion markers, and injects the extension's JS/CSS files exactly once
---- per document. Everything runs entirely client-side (Pyodide/WebAssembly).
+--- insertion markers, and adds the extension's files exactly once per
+--- document. Everything runs entirely client-side (Pyodide/WebAssembly).
 ---
---- Injected files (order matters):
----   in-header : qpyodide-styling.css
----               qpyodide-document-settings.js   (template, placeholders get replaced)
----               (ctm-libs catalogue pyodide-interaktiv: QP_L, set by the settings)
----               qpyodide-document-status.js
----               qpyodide-feedback.js
----               qpyodide-document-engine-initialization.js
----               qpyodide-canvas-plots.js        (interactive plots, second instance)
+--- What a page with cells gets (order matters):
+---   head, dependencies (cacheable files; ctm-libs first):
+---     ctm-runtime, ctm-worker   ctm-libs' Python runtime and worker (CTMWorker)
+---     ctm-locale, ctm-locale-pyodide-interaktiv   the interface strings
+---     pyodide-interaktiv        qpyodide-styling.css and the modules below
+---     pyodide-interaktiv-feedback   qpyodide-feedback.js (feedback on only)
+---   head, inline: coi-serviceworker.js's tag, Monaco's CSS, Font Awesome,
+---     qpyodide-document-settings.js (template, placeholders get replaced;
+---     a classic script: it runs before every module and sets QP_L)
+---   modules, in this order: qpyodide-storage.js, qpyodide-document-status.js,
+---     qpyodide-storage-settings.js, qpyodide-worker-plugin.js,
+---     qpyodide-document-engine-initialization.js, qpyodide-canvas-plots.js
 ---   before-body: qpyodide-monaco-editor-init.html
----   after-body : qpyodide-cell-classes.js
----                qpyodide-cell-initialization.js
+---   after-body : qpyodide-cell-classes.js, qpyodide-cell-initialization.js
 ---
 --- A cell/document can also opt into `*-autoexec` (e.g. `pdf-autoexec`,
 --- `html-autoexec`): instead of the interactive editor or a highlighted
@@ -511,6 +514,17 @@ local function setPyodideOptionsFromSettings(meta)
   return meta
 end
 
+-- This extension's version (its manifest), the version of its HTML
+-- dependencies: a new release is a new URL, so browsers fetch it.
+local versionFound = nil
+local function extensionVersion()
+  if versionFound then return versionFound end
+  local file = io.open(quarto.utils.resolve_path("_extension.yml"), "r")
+  versionFound = file and file:read("*a"):match("\nversion:%s*['\"]?([%w%.%-]+)") or "0"
+  if file then file:close() end
+  return versionFound
+end
+
 -- Read a file that lives next to this .lua filter (resolved via Quarto's path API).
 local function readTemplateFile(template)
   local path = quarto.utils.resolve_path(template)
@@ -656,50 +670,52 @@ local function ensurePyodideSetup()
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
   ]])
 
-  -- Insert CSS styling and external style sheets
-  includeFileInHTMLTag("in-header", "qpyodide-styling.css", "css")
-
-  -- Insert the Pyodide initialization routine
-  includeTextInHTMLTag("in-header", initializedConfigurationPyodide, "module")
-
-  -- Insert the local-storage autosave module (identity resolution + load/
-  -- save/clear, no UI of its own -- its "autosave code to this browser"
-  -- checkbox lives inside the settings gear built by qpyodide-storage-settings.js
-  -- below). Must come after qpyodide-document-settings.js just above (needs
-  -- globalThis.qpyodideLocalStorageOptions and globalThis.qpyodideCellDetails)
-  -- and before qpyodide-storage-settings.js (reads globalThis.qpyodideStorage.anyEnabled
-  -- to decide whether to build the gear at all) and qpyodide-cell-classes.js
-  -- (after-body; reads globalThis.qpyodideStorage for load/save/clear).
-  includeFileInHTMLTag("in-header", "qpyodide-storage.js", "module")
-
   -- The UI translations: ctm-libs' catalogue pyodide-interaktiv (classic head
-  -- scripts, before every module); the settings module sets globalThis.QP_L.
+  -- scripts, before every module); the settings script sets globalThis.QP_L.
   ctm.locale.use("pyodide-interaktiv")
 
-  -- Insert JS routine to add document status header
-  includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
+  -- The page's settings and cells: an inline classic script in the head. It
+  -- runs while the page is parsed, after the dependencies' classic scripts
+  -- (ctm-libs) and before every module below.
+  includeTextInHTMLTag("in-header", initializedConfigurationPyodide, "js")
 
-
-  -- Shared AI feedback adapter and independent local autosave settings.
-  includeFileInHTMLTag("in-header", "qpyodide-feedback.js", "module")
-  includeFileInHTMLTag("in-header", "qpyodide-storage-settings.js", "module")
-
-  -- This extension's part of the worker (runCell, plots, the input() prompt),
-  -- then the routine that brings Python online
-  includeFileInHTMLTag("in-header", "qpyodide-worker-plugin.js", "module")
-  includeFileInHTMLTag("in-header", "qpyodide-document-engine-initialization.js", "module")
-
-  -- Insert the interactive-plot module (second Pyodide instance on the main
-  -- thread, loaded on demand when the first plot appears)
-  includeFileInHTMLTag("in-header", "qpyodide-canvas-plots.js", "module")
+  -- This extension's CSS and modules: cacheable files, one HTML dependency
+  -- (D1; inlined only under embed-resources). Modules run after the page is
+  -- parsed, in document order: the head's in this order, then the ones at
+  -- the end of the body.
+  --   qpyodide-storage.js          local-storage autosave (load/save/clear)
+  --   qpyodide-document-status.js  the status line, input() and COI state
+  --   qpyodide-storage-settings.js the autosave settings (needs qpyodideStorage)
+  --   qpyodide-worker-plugin.js    this extension's part of the worker
+  --   qpyodide-document-engine-initialization.js  brings Python online
+  --   qpyodide-canvas-plots.js     interactive plots (a second Pyodide on the
+  --                                main thread, loaded on the first plot)
+  --   qpyodide-cell-classes.js, qpyodide-cell-initialization.js (end of body)
+  local function module(file, afterBody)
+    return {path = quarto.utils.resolve_path(file), attribs = {type = "module"}, afterBody = afterBody or nil}
+  end
+  ctm.deps.html({
+    name = "pyodide-interaktiv",
+    version = extensionVersion(),
+    stylesheets = {quarto.utils.resolve_path("qpyodide-styling.css")},
+    scripts = {
+      module("qpyodide-storage.js"),
+      module("qpyodide-document-status.js"),
+      module("qpyodide-storage-settings.js"),
+      module("qpyodide-worker-plugin.js"),
+      module("qpyodide-document-engine-initialization.js"),
+      module("qpyodide-canvas-plots.js"),
+      module("qpyodide-cell-classes.js", true),
+      module("qpyodide-cell-initialization.js", true),
+    }
+  })
+  -- The AI feedback adapter, only when feedback is on.
+  if feedbackEnabled == "true" then
+    ctm.deps.html({name = "pyodide-interaktiv-feedback", version = extensionVersion(), scripts = {module("qpyodide-feedback.js")}})
+  end
 
   -- Insert the Monaco Editor initialization
   quarto.doc.include_file("before-body", "qpyodide-monaco-editor-init.html")
-
-  -- Insert the cell data at the end of the document
-  includeFileInHTMLTag("after-body", "qpyodide-cell-classes.js", "module")
-
-  includeFileInHTMLTag("after-body", "qpyodide-cell-initialization.js", "module")
 
 end
 
