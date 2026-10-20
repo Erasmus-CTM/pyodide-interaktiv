@@ -72,7 +72,3 @@ globalThis.qpyodideLocalStorageOptions = {
   enabled: {{LOCALSTORAGEENABLED}},
   epoch: "{{LOCALSTORAGEEPOCH}}"
 };
-
-// UI text of this extension (ctm-libs' catalogue pyodide-interaktiv, loaded
-// before this script): QP_L.<key>, QP_L.engineFailed(message).
-globalThis.QP_L = CTMLocales.table("pyodide-interaktiv", globalThis.qpyodideLang);

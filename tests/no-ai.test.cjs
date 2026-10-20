@@ -33,7 +33,7 @@ function render(dir, env = {}, args = []) {
 function page(dir, file) {
   const html = fs.readFileSync(path.join(dir, file), 'utf8');
   const script = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(text => text.includes('globalThis.qpyodideCellDetails ='));
-  const context = { CTMLocales: { table: () => ({}) } }; context.globalThis = context;
+  const context = {}; context.globalThis = context;
   vm.runInNewContext(script, context);
   return { html, cells: JSON.parse(JSON.stringify(context.qpyodideCellDetails)), options: { ...context.qpyodideFeedbackOptions } };
 }

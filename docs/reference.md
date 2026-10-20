@@ -388,6 +388,7 @@ _extensions/pyodide-interaktiv/
   qpyodide.lua                                 Pandoc Lua filter (adds everything)
   ctm-bootstrap.lua                            Finds ctm-libs (generated copy, byte-identical in every CTM component)
   qpyodide-document-settings.js                Template: document-wide settings (inline classic script)
+  qpyodide-locale.js                           QP_L: the UI text (ctm-libs' catalogue) in the page's language
   qpyodide-document-status.js                  Status line in the title block
   qpyodide-feedback.js                         AI feedback adapter (ctm-libs' feedback)
   qpyodide-worker-plugin.js                    This extension's part of the worker: runCell, plots, input() prompt

@@ -34,7 +34,7 @@ function settings(dir, page) {
   const html = fs.readFileSync(path.join(dir, page.replace(/\.qmd$/, '.html')), 'utf8');
   const script = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(text => text.includes('globalThis.qpyodideCellDetails ='));
   assert.ok(script, 'settings script on ' + page);
-  const context = {CTMLocales: {table: () => ({})}}; context.globalThis = context;
+  const context = {}; context.globalThis = context;
   vm.runInNewContext(script, context);   // throws if the script is broken
   return context;
 }

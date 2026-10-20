@@ -23,8 +23,9 @@ local feedback = nil
 ---     pyodide-interaktiv-feedback   qpyodide-feedback.js (feedback on only)
 ---   head, inline: coi-serviceworker.js's tag, Monaco's CSS, Font Awesome,
 ---     qpyodide-document-settings.js (template, placeholders get replaced;
----     a classic script: it runs before every module and sets QP_L)
----   modules, in this order: qpyodide-storage.js, qpyodide-document-status.js,
+---     a classic script, data only: it runs before every module)
+---   modules, in this order: qpyodide-locale.js (QP_L), qpyodide-storage.js,
+---     qpyodide-document-status.js,
 ---     qpyodide-storage-settings.js, qpyodide-worker-plugin.js,
 ---     qpyodide-document-engine-initialization.js, qpyodide-canvas-plots.js
 ---   before-body: qpyodide-monaco-editor-init.html
@@ -712,7 +713,7 @@ local function ensurePyodideSetup()
   ]])
 
   -- The UI translations: ctm-libs' catalogue pyodide-interaktiv (classic head
-  -- scripts, before every module); the settings script sets globalThis.QP_L.
+  -- scripts, before every module); qpyodide-locale.js sets globalThis.QP_L.
   ctm.locale.use("pyodide-interaktiv")
 
   -- The page's settings and cells: an inline classic script in the head. It
@@ -724,6 +725,7 @@ local function ensurePyodideSetup()
   -- (D1; inlined only under embed-resources). Modules run after the page is
   -- parsed, in document order: the head's in this order, then the ones at
   -- the end of the body.
+  --   qpyodide-locale.js           QP_L, the UI text in the page's language
   --   qpyodide-storage.js          local-storage autosave (load/save/clear)
   --   qpyodide-document-status.js  the status line, input() and COI state
   --   qpyodide-storage-settings.js the autosave settings (needs qpyodideStorage)
@@ -740,6 +742,7 @@ local function ensurePyodideSetup()
     version = extensionVersion(),
     stylesheets = {quarto.utils.resolve_path("qpyodide-styling.css")},
     scripts = {
+      module("qpyodide-locale.js"),
       module("qpyodide-storage.js"),
       module("qpyodide-document-status.js"),
       module("qpyodide-storage-settings.js"),
