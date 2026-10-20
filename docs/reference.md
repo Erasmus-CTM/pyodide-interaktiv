@@ -417,9 +417,10 @@ pieces that pause while a check downloads, and install while nothing else
 runs. This extension's cells wait for both: the status line says "Ready"
 and Run is enabled only then, as before. The plot setup (importing
 `pyplot`) runs with the first cell run, startup cells included. If the
-extra packages cannot be loaded, the status line says so and offers
-**Retry**; cells run anyway (a cell that imports matplotlib shows the
-error).
+extra packages cannot be loaded, the status line says that plots are not
+available and offers **Retry**; other cells run anyway (a cell that imports
+matplotlib shows the error). After a restart, Run waits for the new start,
+and the startup cells run again from the setup cells on.
 
 Core principles of this rework compared to the earlier fork
 (`Pyodide-Feedback`):

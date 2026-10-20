@@ -26,6 +26,10 @@
 
 globalThis.qpyodideCellsReady = false;
 
+// A restart replaces a start: its follower stops, the new start's takes over
+// (CTMWorker rejects the old start and its whenSetup with error.restarted).
+const qpyodideRestarted = (err) => !!(err && err.restarted);
+
 // The extra packages could not be loaded: the status line says so and offers
 // Retry, which repeats the missing steps without restarting Python.
 function qpyodideShowSetupFailed(proxy, err) {
@@ -39,7 +43,7 @@ function qpyodideShowSetupFailed(proxy, err) {
     qpyodideUpdateStatusHeaderSpinner(QP_L.workerInitPackages);
     proxy.retrySetup().then(
       () => qpyodideUpdateStatusHeader(QP_L.engineReady),
-      (again) => qpyodideShowSetupFailed(proxy, again));
+      (again) => { if (!qpyodideRestarted(again)) qpyodideShowSetupFailed(proxy, again); });
   });
   qpyodideStartupMessage.replaceChildren(text, " ", retry);
 }
@@ -47,13 +51,15 @@ function qpyodideShowSetupFailed(proxy, err) {
 // Follows one start of the worker (the page's first, and each restart).
 async function qpyodideFollowWorker(started, afterRestart) {
   globalThis.qpyodideCellsReady = false;
+  // After a restart, Run waits for the new start, as on the first load.
+  if (afterRestart) qpyodideSetInteractiveButtonState(QP_L.runLoading, false);
   const timerStart = performance.now();
 
   let proxy;
   try {
     proxy = await started;
   } catch (err) {
-    qpyodideUpdateStatusHeader(QP_L.engineFailed(err.message));
+    if (!qpyodideRestarted(err)) qpyodideUpdateStatusHeader(QP_L.engineFailed(err.message));
     return;
   }
 
@@ -61,6 +67,7 @@ async function qpyodideFollowWorker(started, afterRestart) {
   try {
     await proxy.whenSetup;
   } catch (err) {
+    if (qpyodideRestarted(err)) return;
     failure = err;
     console.warn("qpyodide: the extra packages could not be loaded", err);
   }

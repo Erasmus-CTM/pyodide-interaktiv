@@ -29,8 +29,11 @@ whole install.
   packages, which load in the background without getting in a check's way.
   This extension's cells look as before: "Ready" and Run once everything is
   loaded. The plot setup runs with the first cell run. If the extra packages
-  cannot be loaded, the status line says so with **Retry**, and cells run
-  without them.
+  cannot be loaded, the status line says that plots are not available and
+  that other Python code runs, with **Retry**, and cells run without them.
+  After Stop restarts Python (pages without cross-origin isolation), Run
+  waits until the new start is ready, and the setup cells run again before
+  any other startup cell.
 - **Cacheable files:** the CSS and scripts load as files (about 180 KB less
   inline per page; faster repeat visits); `embed-resources: true` works.
 - **Builds without AI feedback** (`ai-feedback: enabled: false`,

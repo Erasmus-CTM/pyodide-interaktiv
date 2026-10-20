@@ -96,13 +96,21 @@ function qpyodideCodeHasInput(code) {
   return /\binput\s*\(/.test(code || "");
 }
 
+// Enabling never runs ahead of the cells' readiness: after a restart, Run
+// waits for the new start (qpyodideCellsReady), like on the first load.
 function qpyodideSetRunButtonsEnabled(enabled) {
   document.querySelectorAll(".qpyodide-button-run").forEach((btn) => {
     // input() cells stay locked as long as input() is unavailable
-    btn.disabled = !enabled ||
+    btn.disabled = !enabled || !globalThis.qpyodideCellsReady ||
       (btn.dataset.needsInput === "1" && !globalThis.qpyodideInputAvailable());
   });
 }
+
+// Restarts so far. One start of the worker runs the startup cells once; a
+// restart stops a startup run that is still going (the new start runs them
+// again, setup cells first).
+let qpyodideRuntimeEpoch = 0;
+window.addEventListener("qpyodide-runtime-restart", () => { qpyodideRuntimeEpoch++; });
 
 /**
  * Runs Python code in the Pyodide worker.
@@ -122,8 +130,13 @@ async function qpyodideExecutePython(code, wantPickle) {
   const pyodide = await qpyodideReady;
   // This extension's cells run once the extra packages are there (D2), or
   // without them when they failed; they wait here, before the worker's
-  // queue, so the queue never waits for them.
-  await pyodide.whenSetup?.catch(() => {});
+  // queue, so the queue never waits for them. A restart ends the wait: its
+  // error is the run's outcome, as for a call the restart rejects.
+  try {
+    await pyodide.whenSetup;
+  } catch (err) {
+    if (err && err.restarted) throw err;
+  }
   const result = await pyodide.runCell(code, wantPickle);
   result.text = result.entries.map((entry) => entry.message).join("\n");
   return result;
@@ -970,7 +983,8 @@ class EditorUnit {
       proxy.onStream = null;
       proxy.onInputRequired = null;
       proxy.clearInterrupt();
-      this.runButton.innerHTML = runButtonHtml;
+      // After a restart the cells wait for the new start (qpyodideCellsReady).
+      this.runButton.innerHTML = globalThis.qpyodideCellsReady ? runButtonHtml : QP_L.runLoading;
       this.runButton.title = QP_L.runTitle;
       this.runButton.onclick = () => this.runCode(this.getCode());
       qpyodideExecutionBusy = false;
@@ -1310,17 +1324,24 @@ class CellContainer {
 
   /**
    * Startup phase after Pyodide boots: first all setup cells, then
-   * output cells, finally interactive cells with autorun.
+   * output cells, finally interactive cells with autorun. Once per start of
+   * the worker; a restart stops it (the new start runs it from the top).
    */
   async runStartupCells() {
+    const epoch = qpyodideRuntimeEpoch;
+    if (this.startupEpoch === epoch) return;
+    this.startupEpoch = epoch;
     const order = { setup: 0, output: 1, interactive: 2 };
     const sorted = this.cells.slice().sort((a, b) =>
       (order[a.options.context] ?? 2) - (order[b.options.context] ?? 2)
     );
     for (const cell of sorted) {
+      if (epoch !== qpyodideRuntimeEpoch) return;
       try {
         await cell.runStartup();
       } catch (err) {
+        // A restart ends this run; the new start runs the cells again.
+        if (err && err.restarted) return;
         console.error(`qpyodide: startup phase of cell ${cell.id} failed`, err);
       }
     }
