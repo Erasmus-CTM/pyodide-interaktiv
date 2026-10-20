@@ -34,7 +34,7 @@ function settings(dir, page) {
   const html = fs.readFileSync(path.join(dir, page.replace(/\.qmd$/, '.html')), 'utf8');
   const script = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(text => text.includes('globalThis.qpyodideCellDetails ='));
   assert.ok(script, 'settings script on ' + page);
-  const context = {}; context.globalThis = context;
+  const context = {CTMLocales: {table: () => ({})}}; context.globalThis = context;
   vm.runInNewContext(script, context);   // throws if the script is broken
   return context;
 }
@@ -64,7 +64,7 @@ test('1 and 0 keep their meaning, as YAML numbers and as strings; empty values a
   assert.equal(r.status, 0, r.stderr);
   const s = settings(dir, 'page.qmd');
   assert.equal(s.qpyodideShowStartupMessage, false);
-  assert.deepEqual({ ...s.qpyodideFeedbackOptions }, { enabled: true, storage: 'local', hints: false });
+  assert.deepEqual({ ...s.qpyodideFeedbackOptions }, { enabled: true, storage: 'local', hints: false, uiLanguage: 'en' });
   assert.equal(s.qpyodideLocalStorageOptions.enabled, true);
   assert.doesNotMatch(r.stderr, /must be true or false/);
 }));
@@ -122,4 +122,20 @@ test('LaTeX/PDF: pdf-fallback (python) and pdf-autoexec from _quarto.yml reach t
   assert.doesNotMatch(fallback, /pyodide-python/);
   const run = fs.readFileSync(path.join(dir, 'run.tex'), 'utf8');
   assert.match(run, /\b42\b/, 'the cell ran at render time');
+}));
+
+test('languages: pyodide: lang, ctm-assessment: lang, then lang; no and nn give Bokmål; noscript from the catalogue', { skip }, () => withProject({
+  '_quarto.yml': yml(['own.qmd', 'shared.qmd', 'no.qmd', 'nn.qmd', 'other.qmd']),
+  'own.qmd': '---\ntitle: t\nlang: de\nctm-assessment:\n  lang: en\npyodide:\n  lang: sv\n---\n' + CELL,
+  'shared.qmd': '---\ntitle: t\nlang: en\nctm-assessment:\n  lang: de\n---\n' + CELL,
+  'no.qmd': '---\ntitle: t\nlang: no\n---\n' + CELL,
+  'nn.qmd': '---\ntitle: t\nlang: nn\n---\n' + CELL,
+  'other.qmd': '---\ntitle: t\nlang: fr\n---\n' + CELL,
+}, dir => {
+  const r = render(dir);
+  assert.equal(r.status, 0, r.stderr);
+  const langs = Object.fromEntries(['own', 'shared', 'no', 'nn', 'other'].map(page => [page, settings(dir, page + '.qmd').qpyodideLang]));
+  assert.deepEqual(langs, { own: 'sv', shared: 'de', no: 'nb', nn: 'nb', other: 'en' });
+  assert.equal(settings(dir, 'no.qmd').qpyodideFeedbackOptions.uiLanguage, 'nb');
+  assert.match(fs.readFileSync(path.join(dir, 'nn.html'), 'utf8'), /<noscript>Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden\.<\/noscript>/);
 }));

@@ -35,8 +35,8 @@ globalThis.qpyodideCanvasBackend = "{{CANVASBACKEND}}";
 
 // UI language for this render pass ----
 //
-// Set by the Lua filter from `pyodide: lang:` or Quartos own `lang:`.
-// qpyodide-locales.js picks the matching translation table from this value.
+// Set by the Lua filter (ctm.locale: `pyodide: lang:`, `ctm-assessment: lang:`,
+// Quarto's own `lang:`): a language of the catalogue (en, de, sv, nb, da).
 globalThis.qpyodideLang = "{{LANG}}";
 
 // Store cell data
@@ -50,10 +50,13 @@ globalThis.qpyodideCellDetails = {{QPYODIDECELLDETAILS}};
 //           Can be changed by the user in the settings panel.
 // hints   : progressive hints – the hint level rises with each click of the
 //           Feedback button on the same cell.
+// uiLanguage : the language of the feedback interface and of the feedback
+//              (this extension's interface language).
 globalThis.qpyodideFeedbackOptions = {
   enabled: {{FEEDBACKENABLED}},
   storage: "{{FEEDBACKSTORAGE}}",
-  hints: {{FEEDBACKHINTS}}
+  hints: {{FEEDBACKHINTS}},
+  uiLanguage: "{{LANG}}"
 };
 
 // Local-storage autosave feature settings ----
@@ -69,3 +72,7 @@ globalThis.qpyodideLocalStorageOptions = {
   enabled: {{LOCALSTORAGEENABLED}},
   epoch: "{{LOCALSTORAGEEPOCH}}"
 };
+
+// UI text of this extension (ctm-libs' catalogue pyodide-interaktiv, loaded
+// before this script): QP_L.<key>, QP_L.engineFailed(message).
+globalThis.QP_L = CTMLocales.table("pyodide-interaktiv", globalThis.qpyodideLang);

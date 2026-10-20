@@ -18,7 +18,7 @@ local feedback = nil
 --- Injected files (order matters):
 ---   in-header : qpyodide-styling.css
 ---               qpyodide-document-settings.js   (template, placeholders get replaced)
----               qpyodide-locales.js             (UI text per language; defines QP_L)
+---               (ctm-libs catalogue pyodide-interaktiv: QP_L, set by the settings)
 ---               qpyodide-document-status.js
 ---               qpyodide-feedback.js
 ---               qpyodide-document-engine-initialization.js
@@ -103,29 +103,9 @@ local installPythonPackagesList = "''"
 ----
 --- Setup variables for localization (i18n)
 
--- Active UI language. Resolved per render pass from `pyodide: lang:` or Quarto's
--- own `lang:`; see resolveLang(). Default: English.
+-- Active UI language: a code of ctm-libs' catalogue pyodide-interaktiv (en,
+-- de, sv, nb, da). Resolved per render pass by resolveLang(). Default: English.
 local lang = "en"
-
--- Supported locales. Extend this set together with qpyodide-locales.js.
-local supportedLangs = {
-  ["en"] = true,
-  ["de"] = true,
-  ["sv"] = true,
-  ["no"] = true,
-  ["nb"] = true,
-  ["da"] = true
-}
-
--- Noscript message per locale
-local noscriptMessages = {
-  en = "Please enable JavaScript to experience the dynamic code cell content on this page.",
-  de = "Bitte JavaScript aktivieren, um die interaktiven Code-Zellen dieser Seite zu nutzen.",
-  sv = "Aktivera JavaScript för att kunna använda de interaktiva kodcellerna på den här sidan.",
-  no = "Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden.",
-  nb = "Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden.",
-  da = "Slå JavaScript til for at kunne bruge de interaktive kodeceller på denne side."
-}
 
 ----
 --- Setup variables for the AI feedback feature
@@ -351,35 +331,23 @@ end
 -- ----
 -- ```
 --
--- Determine the UI language for this render pass.
---
--- Order of precedence:
---   1. `pyodide: lang: xx`  – explicit override
---   2. Quarto's own `lang:` – set per profile in a multilingual project
---   3. "en"                 – fallback
---
--- Region subtags are dropped ("de-DE" -> "de"); unsupported languages fall back
--- to English instead of failing the render.
+-- Determine the UI language for this render pass (ctm.locale, one resolver
+-- for every CTM component): `pyodide: lang`, then `ctm-assessment: lang`
+-- (HTML), then Quarto's own `lang`, then English; then the first language of
+-- that tag's chain the catalogue has ("de-DE" -> de, "no" and "nn" -> nb,
+-- unsupported -> en). Other formats read `pyodide: lang` from Quarto's map.
 local function resolveLang(meta)
+  if quarto.doc.is_format("html") then
+    return (ctm.locale.resolve("pyodide-interaktiv"))
+  end
   local raw = nil
-
   local pyodide = meta.pyodide
   if isVariablePopulated(pyodide) and isVariablePopulated(pyodide["lang"]) then
     raw = pandoc.utils.stringify(pyodide["lang"])
   elseif isVariablePopulated(meta["lang"]) then
     raw = pandoc.utils.stringify(meta["lang"])
   end
-
-  if raw == nil or raw == "" then
-    return "en"
-  end
-
-  local base = raw:lower():match("^(%a+)")
-  if base and supportedLangs[base] then
-    return base
-  end
-
-  return "en"
+  return ctm.locale.language("pyodide-interaktiv", raw or "en")
 end
 
 -- The URL parts: the scripts load indexURL .. "pyodide.mjs", so both parts
@@ -754,10 +722,9 @@ local function ensurePyodideSetup()
   -- (after-body; reads globalThis.qpyodideStorage for load/save/clear).
   includeFileInHTMLTag("in-header", "qpyodide-storage.js", "module")
 
-  -- Insert the UI translations. Must come directly after the settings module
-  -- (which defines globalThis.qpyodideLang) and before every module that reads
-  -- globalThis.QP_L at load time.
-  includeFileInHTMLTag("in-header", "qpyodide-locales.js", "module")
+  -- The UI translations: ctm-libs' catalogue pyodide-interaktiv (classic head
+  -- scripts, before every module); the settings module sets globalThis.QP_L.
+  ctm.locale.use("pyodide-interaktiv")
 
   -- Insert JS routine to add document status header
   includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
@@ -786,7 +753,7 @@ end
 
 local function qPyodideJSCellInsertionCode(counter)
   local insertionLocation = '<div id="qpyodide-insertion-location-' .. counter ..'"></div>\n'
-  local noscriptWarning = '<noscript>' .. (noscriptMessages[lang] or noscriptMessages.en) .. '</noscript>'
+  local noscriptWarning = '<noscript>' .. ctm.locale.text("pyodide-interaktiv", "noscript", lang) .. '</noscript>'
   return insertionLocation .. noscriptWarning
 end
 
