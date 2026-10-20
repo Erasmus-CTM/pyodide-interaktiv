@@ -57,12 +57,12 @@ test('feedback: false loads nothing of ai-feedback', { skip }, () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('copied by hand without ai-feedback, the render names the install command', { skip }, () => {
+test('copied by hand without ctm-libs, the render names the install command', { skip }, () => {
   const dir = project(['pyodide-interaktiv']);
   try {
     const r = render(dir);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /quarto add Erasmus-CTM\/ai-feedback/);
+    assert.match(r.stderr, /pyodide-interaktiv needs its library ctm-libs, which is missing next to it\. Install pyodide-interaktiv again: quarto add Erasmus-CTM\/pyodide-interaktiv/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -133,5 +133,36 @@ test('build-variant: full/ is kept as it is', { skip }, () => {
     const r = render(dir);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(indexUrlOf(r.html), 'https://cdn.jsdelivr.net/pyodide/v0.27.2/full/');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Projects of pyodide-interaktiv 1.8 keep their ai-feedback 0.8.1 folder after
+// updating only when they do not reinstall it (Quarto removes nothing). The
+// forwarder this repository ships replaces it on `quarto add`. A stale 0.8.1
+// folder that a page lists next to pyodide-interaktiv 1.9 stops the page with
+// the migration message, in either filter order (step-3 design §18.4).
+// CTM_LEGACY_AI_FEEDBACK: the 0.8.1 extension folder (CI checks it out).
+const legacy = process.env.CTM_LEGACY_AI_FEEDBACK;
+const skipLegacy = skip || (legacy && fs.existsSync(path.join(legacy, 'feedback-quarto.lua')) ? false : 'Set CTM_LEGACY_AI_FEEDBACK to the ai-feedback 0.8.1 extension folder');
+
+for (const filters of [['Erasmus-CTM/ai-feedback', 'Erasmus-CTM/pyodide-interaktiv'], ['Erasmus-CTM/pyodide-interaktiv', 'Erasmus-CTM/ai-feedback']]) {
+  test('a stale ai-feedback 0.8.1 listed next to 1.9 stops with the migration message: ' + filters.join(', '), { skip: skipLegacy }, () => {
+    const dir = project(['pyodide-interaktiv', 'ctm-libs'], text => text.replace('  - Erasmus-CTM/pyodide-interaktiv\n', filters.map(f => '  - ' + f + '\n').join('')));
+    try {
+      fs.cpSync(legacy, path.join(dir, '_extensions/Erasmus-CTM/ai-feedback'), { recursive: true });
+      const r = render(dir);
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /combines filters that use different ai-feedback versions: .*\(0\.8\.1\) and .*\. AI feedback is part of CTM Assessment and of pyodide-interaktiv 1\.9: remove ai-feedback from filters: and delete the old folder\./s);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+test('after the update the forwarder replaces the 0.8.1 folder: ai-feedback listed still renders, with one warning', { skip }, () => {
+  const dir = project(undefined, text => text.replace('  - Erasmus-CTM/pyodide-interaktiv\n', '  - Erasmus-CTM/ai-feedback\n  - Erasmus-CTM/pyodide-interaktiv\n'));
+  try {
+    const r = render(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stderr.match(/filters: \[ai-feedback\] is deprecated/g)?.length, 1, r.stderr);
+    assert.match(r.html, /feedback-core\.js/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

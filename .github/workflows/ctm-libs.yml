@@ -25,6 +25,15 @@ jobs:
       - name: The shipped _extensions/ctm-libs, ai-feedback and ctm-bootstrap.lua match the recorded commit
         run: python3 scripts/sync-ctm-libs.py _ci/ctm-libs-shipped --check
       - uses: ./.github/actions/review-ctm-libs
+      - name: ai-feedback 0.8.1 (the folder 1.8 projects keep; tests/old-projects.test.cjs)
+        uses: actions/checkout@v4
+        with:
+          repository: Erasmus-CTM/ctm-libs
+          ref: 79103a6a829b9c5cf62f645857ca7f8330ff7be2
+          path: _ci/ai-feedback-0.8.1
+          sparse-checkout: _extensions/ai-feedback
+          persist-credentials: false
+      - run: echo "CTM_LEGACY_AI_FEEDBACK=$GITHUB_WORKSPACE/_ci/ai-feedback-0.8.1/_extensions/ai-feedback" >> "$GITHUB_ENV"
       - uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: '1.8.27'

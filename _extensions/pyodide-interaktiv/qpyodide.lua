@@ -1,3 +1,9 @@
+-- ctm-libs, the library of CTM Assessment: the one next to this extension,
+-- in the CTM Assessment package or in the copy this extension ships
+-- (`quarto add Erasmus-CTM/pyodide-interaktiv` installs it). ctm.feedback is
+-- touched only inside the filter functions (step-3 design §18.4).
+local ctm = dofile(quarto.utils.resolve_path("ctm-bootstrap.lua"))("pyodide-interaktiv",
+  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 2})
 local feedback = nil
 ----
 --- qpyodide.lua – Pandoc Lua filter of the `pyodide-interaktiv` extension
@@ -1812,38 +1818,32 @@ local function stitchDocument(doc)
   return doc
 end
 
--- Shared locator for ai-feedback and JSXGraph (feedback-loader.lua).
 local needFeedback = false
-local dependencies = nil
-local function deps()
-  dependencies = dependencies or dofile(quarto.utils.resolve_path("feedback-loader.lua"))
-  return dependencies
-end
 
 return {
   {
     Meta = setPyodideInitializationOptions
   },
-  -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback shipped
-  -- with this extension is installed together with it. A page that uses a
-  -- missing optional extension stops with the install command. Decided before
-  -- callouts are marked, so hidden callouts never reach a feedback context.
+  -- Feedback is on unless `pyodide: feedback: false`; AI feedback is part of
+  -- ctm-libs. A page that uses JSXGraph without the extension stops with the
+  -- install command. Decided before callouts are marked, so hidden callouts
+  -- never reach a feedback context.
   { Pandoc = function(doc)
       if not quarto.doc.is_format("html") then return doc end
-      deps().requireUsed(doc, "pyodide-interaktiv")
-      needFeedback = feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] == true
+      ctm.deps.requireUsed(doc, "pyodide-interaktiv")
+      needFeedback = feedbackEnabled ~= "false" or ctm.deps.uses(doc)["ai-feedback"] == true
       return doc
     end },
   { Callout = function(c)
       if needFeedback and quarto.doc.is_format("html") then
-        feedback = feedback or deps().feedback()
+        feedback = feedback or ctm.feedback
         return feedback.markCallout(c)
       end
       return c
     end },
   { Pandoc = function(doc)
       if needFeedback and quarto.doc.is_format("html") then
-        feedback = feedback or deps().feedback()
+        feedback = feedback or ctm.feedback
         return feedback.prepare(doc)
       end
       return doc
