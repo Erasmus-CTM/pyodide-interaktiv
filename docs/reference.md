@@ -578,6 +578,21 @@ page:
   corresponding notice. This is not a security problem but a
   compatibility one.
 
+### The check reload
+
+A page that is not yet isolated reloads itself once, when the worker is
+ready, so that the worker's headers apply. The rule:
+
+- At most one check reload per tab. After a hard reload (which bypasses the
+  worker) one more is made, never more than two within two minutes.
+- Still not isolated after the check reload, with the worker in control: the
+  check has failed, and `input()` and **Stop** are unavailable on this page.
+  The page remembers this in `localStorage` (`qpyodide-coi-check-failed`) for
+  24 hours; during that time new tabs do not check again. After 24 hours the
+  check reload is made once more.
+- A page that is isolated (the worker, or the server's COOP/COEP headers, as
+  in an exam build) deletes the remembered failure.
+
 **There is no security risk for students:** either `input()` works (with
 security-enhancing COI isolation), or the browser blocks the service
 worker and `input()` is simply unavailable – the browser remains equally

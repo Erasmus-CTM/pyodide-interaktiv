@@ -68,8 +68,15 @@ whole install.
   seconds (seen in the umbrella's first-visit comparison in WebKit, where it
   kept deep links from settling). The page now records its reload
   (`qpyodide-coi-reload-sent` in `sessionStorage`); still not isolated after
-  it, it sets the verdict `coi-serviceworker.js` sets (input() is
-  unavailable for the origin) and does not reload again.
+  it, and controlled by the worker, it concludes that input() is unavailable
+  and does not reload again. A hard reload (Ctrl+Shift+R, which bypasses the
+  worker) is not the failed check: it reloads once more, never more than
+  twice within two minutes. The conclusion (`qpyodide-coi-check-failed` in
+  `localStorage`, the time) holds for 24 hours, then the check is made once
+  more, so one failure on a first visit does not switch input() and Stop off
+  on that browser for good. The page no longer writes the permanent verdict
+  of `coi-serviceworker.js`. An isolated page (server headers, as in an exam
+  build) deletes the conclusion.
 - `feedback-loader.lua` and the shipped ai-feedback 0.8.1 go;
   `scripts/sync-ctm-libs.py` (with `--check` in CI) replaces
   `scripts/sync-ai-feedback.py`; CI reads review refs with the umbrella's
