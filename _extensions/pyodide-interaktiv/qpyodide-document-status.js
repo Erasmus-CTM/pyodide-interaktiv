@@ -48,14 +48,42 @@ console.log("[qpyodide-coi] initial state: " + globalThis.qpyodideInputState +
   " (crossOriginIsolated=" + globalThis.crossOriginIsolated + ")");
 
 if (!globalThis.crossOriginIsolated) {
+  // The check reload happens once per tab. coi-serviceworker.js (ctm-libs,
+  // unchanged) concludes that the reload did not isolate the page from the
+  // navigation type "reload". WebKit reports a reload by location.reload()
+  // as "navigate" (seen in Playwright's WebKit, which cannot isolate with
+  // COEP credentialless either): the page was then not marked unavailable,
+  // registered the worker again, got "ready" again and reloaded again, every
+  // two seconds for as long as the tab stayed open. So the page records its
+  // own reload; finding that record fresh after a reload while still not
+  // isolated, it concludes itself what coi-serviceworker.js concludes:
+  // input() is not possible here, for this origin (the verdict that script
+  // keeps in localStorage).
+  const QPYODIDE_COI_SENT = "qpyodide-coi-reload-sent";
+  const QPYODIDE_COI_RECENT_MS = 120000;
+  function qpyodideReloadedRecently() {
+    try {
+      const sent = Number(sessionStorage.getItem(QPYODIDE_COI_SENT));
+      return sent > 0 && Date.now() - sent < QPYODIDE_COI_RECENT_MS;
+    } catch (ex) { return false; /* blocked */ }
+  }
   function qpyodideHandleCoiReady() {
     if (qpyodideUserInteracted) {
       console.log("[qpyodide-coi] ready, but the user has already interacted – reload skipped.");
       qpyodideSetInputState("needs-reload");
       return;
     }
+    if (qpyodideReloadedRecently()) {
+      console.log("[qpyodide-coi] reloaded a moment ago and still not isolated – input() is unavailable here.");
+      try { localStorage.setItem("qpyodide-coi-unavailable-" + location.origin, "1"); } catch (ex) { /* blocked */ }
+      qpyodideSetInputState("unavailable");
+      return;
+    }
     console.log("[qpyodide-coi] ready – triggering reload.");
-    try { sessionStorage.setItem("qpyodide-coi-reload-pending", "1"); } catch (ex) { /* blocked */ }
+    try {
+      sessionStorage.setItem("qpyodide-coi-reload-pending", "1");
+      sessionStorage.setItem(QPYODIDE_COI_SENT, String(Date.now()));
+    } catch (ex) { /* blocked */ }
     location.reload();
   }
   function qpyodideHandleCoiUnavailable() {

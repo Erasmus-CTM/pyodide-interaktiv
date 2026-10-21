@@ -61,6 +61,15 @@ whole install.
   `nb` for `no`; `qpyodideFeedbackOptions.uiLanguage`; `MPLBACKEND=AGG` in the
   worker.
 - `coi-serviceworker.js` comes from ctm-libs, unchanged.
+- The check reload that makes a page cross-origin isolated happens once per
+  tab. WebKit reports a reload by `location.reload()` as navigation type
+  "navigate", which `coi-serviceworker.js` takes for "no reload yet": the
+  page registered the worker, said "ready" and reloaded again every two
+  seconds (seen in the umbrella's first-visit comparison in WebKit, where it
+  kept deep links from settling). The page now records its reload
+  (`qpyodide-coi-reload-sent` in `sessionStorage`); still not isolated after
+  it, it sets the verdict `coi-serviceworker.js` sets (input() is
+  unavailable for the origin) and does not reload again.
 - `feedback-loader.lua` and the shipped ai-feedback 0.8.1 go;
   `scripts/sync-ctm-libs.py` (with `--check` in CI) replaces
   `scripts/sync-ai-feedback.py`; CI reads review refs with the umbrella's
