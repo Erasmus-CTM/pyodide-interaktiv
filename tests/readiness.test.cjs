@@ -313,3 +313,29 @@ test('B1 (set review): a Run clicked as soon as Run is enabled waits for the set
   assert.ok(p.runButtons().every(b => !b.disabled), 'Run is free again');
   p.w.close();
 });
+
+test('S9 (set review): Runs clicked on two cells during the setup cells both run after them, in click order; each button shows it waits', async () => {
+  const p = page({cells: [
+    {id: 1, code: 'A = 1', options: {context: 'setup'}},
+    {id: 2, code: 'B = A + 1', options: {context: 'setup'}},
+    {id: 3, code: 'print("first", B)', options: {context: 'interactive'}},
+    {id: 4, code: 'print("second", B)', options: {context: 'interactive'}},
+  ]});
+  await p.stage1(0);
+  p.workers[0].reply({type: 'setup', ok: true});
+  await tick(); await tick();
+  const [first, second] = p.runButtons();
+  // The second cell is clicked first: click order, not page order.
+  second.click();
+  await tick();
+  first.click();
+  await tick();
+  const waiting = p.w.QP_L.runLoading.replace(/<[^>]*>/g, '').trim();
+  assert.deepEqual([first.textContent.trim(), second.textContent.trim()], [waiting, waiting], 'both buttons say they wait');
+  assert.ok(first.disabled && second.disabled);
+  const answered = new Set();
+  for (let round = 0; round < 12; round++) { answerRuns(p.workers[0], answered); for (let i = 0; i < 4; i++) await tick(); }
+  assert.deepEqual(p.runCells(p.workers[0]), ['A = 1', 'B = A + 1', 'print("second", B)', 'print("first", B)'], 'no click is lost');
+  assert.ok(p.runButtons().every(b => !b.disabled && b.textContent.trim() !== waiting), 'Run is free again');
+  p.w.close();
+});

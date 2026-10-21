@@ -35,9 +35,10 @@ whole install.
   After Stop restarts Python (pages without cross-origin isolation), Run
   waits until the new start is ready, and the setup cells run again before
   any other startup cell.
-  A Run clicked while the page's setup and output cells are still running
-  waits for them (its button shows that it is loading), so a cell that uses
-  their names never runs before them; the plot setup made that phase longer
+  A Run clicked during the startup phase (setup, output and autorun cells)
+  waits for it, and Runs clicked on several cells then run one by one in
+  click order (each button shows that it is waiting), so a cell that uses
+  the setup cells' names never runs before them and no click is lost; the plot setup made that phase longer
   than in 1.8 (several seconds on a page with plots).
 - **Cacheable files:** the CSS and scripts load as files (about 180 KB less
   inline per page; faster repeat visits); `embed-resources: true` works.

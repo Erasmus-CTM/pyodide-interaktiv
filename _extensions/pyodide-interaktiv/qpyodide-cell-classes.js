@@ -101,7 +101,7 @@ function qpyodideCodeHasInput(code) {
 function qpyodideSetRunButtonsEnabled(enabled) {
   document.querySelectorAll(".qpyodide-button-run").forEach((btn) => {
     // input() cells stay locked as long as input() is unavailable
-    btn.disabled = !enabled || !globalThis.qpyodideCellsReady ||
+    btn.disabled = !enabled || !globalThis.qpyodideCellsReady || btn.dataset.queued === "1" ||
       (btn.dataset.needsInput === "1" && !globalThis.qpyodideInputAvailable());
   });
 }
@@ -110,6 +110,8 @@ function qpyodideSetRunButtonsEnabled(enabled) {
 // restart stops a startup run that is still going (the new start runs them
 // again, setup cells first).
 let qpyodideRuntimeEpoch = 0;
+// The runs clicked during a startup phase, in click order (runCode).
+let qpyodideQueuedRuns = Promise.resolve();
 window.addEventListener("qpyodide-runtime-restart", () => { qpyodideRuntimeEpoch++; globalThis.qpyodideStartupPhaseDone = false; });
 // True once the current start's startup phase (setup, output and autorun
 // cells) is over; event "qpyodide-startup-done". For tools and tests.
@@ -859,23 +861,38 @@ class EditorUnit {
    * restart) – the page stays fully usable throughout.
    * @returns {Promise<string>} the interpreter's text output
    */
-  async runCode(code) {
+  async runCode(code, { queued = false } = {}) {
     if (qpyodideExecutionBusy) return "";
-    // A run waits for this start's setup and output cells: they run outside
-    // the Run lock, and a cell that uses their names would fail before them
-    // (Run is enabled when the cells may run, and the startup phase starts
-    // then). Meanwhile this button says the code is waiting.
+    // A run clicked during this start's startup phase waits for it: setup
+    // and output cells run outside the Run lock, and a cell that uses their
+    // names would fail before them (Run is enabled when the cells may run,
+    // and the startup phase starts then). Runs clicked meanwhile run after
+    // it, one by one, in click order; each button says it is waiting.
     const epoch = qpyodideRuntimeEpoch;
-    const preparing = globalThis.qpyodideCellContainer?.preparing(epoch);
-    if (preparing) {
+    const starting = queued ? null : globalThis.qpyodideCellContainer?.starting(epoch);
+    if (starting) {
+      if (this.runButton.dataset.queued === "1") return "";
       const label = this.runButton.innerHTML;
       this.runButton.innerHTML = QP_L.runLoading;
+      this.runButton.dataset.queued = "1";
       this.runButton.disabled = true;
-      await preparing;
-      this.runButton.innerHTML = label;
-      qpyodideSetRunButtonsEnabled(!qpyodideExecutionBusy);
-      // A restart meanwhile: the new start runs its startup cells first.
-      if (epoch !== qpyodideRuntimeEpoch || qpyodideExecutionBusy) return "";
+      const previous = qpyodideQueuedRuns;
+      let release;
+      qpyodideQueuedRuns = new Promise((resolve) => { release = resolve; });
+      try {
+        await starting;
+        await previous;
+        this.runButton.innerHTML = label;
+        delete this.runButton.dataset.queued;
+        // A restart meanwhile: the new start runs its startup cells first.
+        if (epoch !== qpyodideRuntimeEpoch) {
+          qpyodideSetRunButtonsEnabled(!qpyodideExecutionBusy);
+          return "";
+        }
+        return await this.runCode(code, { queued: true });
+      } finally {
+        release();
+      }
     }
     this.feedbackHandle?.reset('run');
     this.invalidateFeedback();
@@ -1247,7 +1264,7 @@ class InteractiveCell extends BaseCell {
   /** autorun option: run the code once after Pyodide has started. */
   async runStartup() {
     if (this.options.autorun === "true") {
-      await this.primaryUnit.runCode(this.code);
+      await this.primaryUnit.runCode(this.code, { queued: true });
     }
   }
 }
@@ -1354,18 +1371,16 @@ class CellContainer {
     const sorted = this.cells.slice().sort((a, b) =>
       (order[a.options.context] ?? 2) - (order[b.options.context] ?? 2)
     );
-    // Until the setup and output cells have run, preparing(epoch) is a
-    // promise that an interactive run waits for (runCode); the autorun cells
-    // come after them, under the Run lock like any run.
-    let prepared;
-    this.prepare = { epoch, promise: new Promise((resolve) => { prepared = resolve; }), done: false };
-    const prepare = this.prepare;
-    const finishPreparing = () => { prepare.done = true; prepared(); };
+    // Until the startup phase is over, starting(epoch) is a promise that a
+    // clicked run waits for (runCode).
+    let started;
+    this.phase = { epoch, promise: new Promise((resolve) => { started = resolve; }), done: false };
+    const phase = this.phase;
+    const finishPreparing = () => { phase.done = true; started(); };
     this.startup = (async () => {
       try {
         for (const cell of sorted) {
           if (epoch !== qpyodideRuntimeEpoch) return;
-          if ((cell.options.context ?? "interactive") !== "setup" && cell.options.context !== "output") finishPreparing();
           try {
             await cell.runStartup();
           } catch (err) {
@@ -1385,10 +1400,10 @@ class CellContainer {
     return this.startup;
   }
 
-  /** The promise an interactive run of start `epoch` waits for, or null. */
-  preparing(epoch) {
-    const prepare = this.prepare;
-    return prepare && prepare.epoch === epoch && !prepare.done ? prepare.promise : null;
+  /** The promise a run clicked during start `epoch`'s startup phase waits for, or null. */
+  starting(epoch) {
+    const phase = this.phase;
+    return phase && phase.epoch === epoch && !phase.done ? phase.promise : null;
   }
 }
 
