@@ -110,7 +110,10 @@ function qpyodideSetRunButtonsEnabled(enabled) {
 // restart stops a startup run that is still going (the new start runs them
 // again, setup cells first).
 let qpyodideRuntimeEpoch = 0;
-window.addEventListener("qpyodide-runtime-restart", () => { qpyodideRuntimeEpoch++; });
+window.addEventListener("qpyodide-runtime-restart", () => { qpyodideRuntimeEpoch++; globalThis.qpyodideStartupPhaseDone = false; });
+// True once the current start's startup phase (setup, output and autorun
+// cells) is over; event "qpyodide-startup-done". For tools and tests.
+globalThis.qpyodideStartupPhaseDone = false;
 
 /**
  * Runs Python code in the Pyodide worker.
@@ -858,6 +861,22 @@ class EditorUnit {
    */
   async runCode(code) {
     if (qpyodideExecutionBusy) return "";
+    // A run waits for this start's setup and output cells: they run outside
+    // the Run lock, and a cell that uses their names would fail before them
+    // (Run is enabled when the cells may run, and the startup phase starts
+    // then). Meanwhile this button says the code is waiting.
+    const epoch = qpyodideRuntimeEpoch;
+    const preparing = globalThis.qpyodideCellContainer?.preparing(epoch);
+    if (preparing) {
+      const label = this.runButton.innerHTML;
+      this.runButton.innerHTML = QP_L.runLoading;
+      this.runButton.disabled = true;
+      await preparing;
+      this.runButton.innerHTML = label;
+      qpyodideSetRunButtonsEnabled(!qpyodideExecutionBusy);
+      // A restart meanwhile: the new start runs its startup cells first.
+      if (epoch !== qpyodideRuntimeEpoch || qpyodideExecutionBusy) return "";
+    }
     this.feedbackHandle?.reset('run');
     this.invalidateFeedback();
     const revision = this.feedbackRevision;
@@ -1329,22 +1348,47 @@ class CellContainer {
    */
   async runStartupCells() {
     const epoch = qpyodideRuntimeEpoch;
-    if (this.startupEpoch === epoch) return;
+    if (this.startupEpoch === epoch) return this.startup;
     this.startupEpoch = epoch;
     const order = { setup: 0, output: 1, interactive: 2 };
     const sorted = this.cells.slice().sort((a, b) =>
       (order[a.options.context] ?? 2) - (order[b.options.context] ?? 2)
     );
-    for (const cell of sorted) {
-      if (epoch !== qpyodideRuntimeEpoch) return;
+    // Until the setup and output cells have run, preparing(epoch) is a
+    // promise that an interactive run waits for (runCode); the autorun cells
+    // come after them, under the Run lock like any run.
+    let prepared;
+    this.prepare = { epoch, promise: new Promise((resolve) => { prepared = resolve; }), done: false };
+    const prepare = this.prepare;
+    const finishPreparing = () => { prepare.done = true; prepared(); };
+    this.startup = (async () => {
       try {
-        await cell.runStartup();
-      } catch (err) {
-        // A restart ends this run; the new start runs the cells again.
-        if (err && err.restarted) return;
-        console.error(`qpyodide: startup phase of cell ${cell.id} failed`, err);
+        for (const cell of sorted) {
+          if (epoch !== qpyodideRuntimeEpoch) return;
+          if ((cell.options.context ?? "interactive") !== "setup" && cell.options.context !== "output") finishPreparing();
+          try {
+            await cell.runStartup();
+          } catch (err) {
+            // A restart ends this run; the new start runs the cells again.
+            if (err && err.restarted) return;
+            console.error(`qpyodide: startup phase of cell ${cell.id} failed`, err);
+          }
+        }
+      } finally {
+        finishPreparing();
+        if (epoch === qpyodideRuntimeEpoch) {
+          globalThis.qpyodideStartupPhaseDone = true;
+          window.dispatchEvent(new Event("qpyodide-startup-done"));
+        }
       }
-    }
+    })();
+    return this.startup;
+  }
+
+  /** The promise an interactive run of start `epoch` waits for, or null. */
+  preparing(epoch) {
+    const prepare = this.prepare;
+    return prepare && prepare.epoch === epoch && !prepare.done ? prepare.promise : null;
   }
 }
 

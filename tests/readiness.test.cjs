@@ -282,3 +282,34 @@ test('a restart during Retry is no failure: no orange text, no Retry; the new st
   assert.ok(p.runButtons().every(button => !button.disabled));
   p.w.close();
 });
+
+test('B1 (set review): a Run clicked as soon as Run is enabled waits for the setup cells; it says so meanwhile', async () => {
+  // Two setup cells, the second defines what the interactive cell uses.
+  const p = page({cells: [
+    {id: 1, code: 'A = 1', options: {context: 'setup'}},
+    {id: 2, code: 'B = A + 1', options: {context: 'setup'}},
+    {id: 3, code: 'print(B)', options: {context: 'interactive'}},
+  ]});
+  await p.stage1(0);
+  p.workers[0].reply({type: 'setup', ok: true});
+  await tick(); await tick();
+  assert.deepEqual(p.runCells(p.workers[0]), ['A = 1'], 'the first setup cell runs');
+  const button = p.runButtons()[0];
+  assert.equal(button.disabled, false, 'Run is enabled with the cells');
+  assert.equal(p.w.qpyodideStartupPhaseDone, false);
+  button.click();
+  for (let i = 0; i < 4; i++) await tick();
+  assert.deepEqual(p.runCells(p.workers[0]), ['A = 1'], 'the Run waits: nothing between the setup cells');
+  assert.equal(button.textContent.trim(), p.w.QP_L.runLoading.replace(/<[^>]*>/g, '').trim(), 'the button says it waits');
+  p.workers[0].answer('runCell', {entries: [], images: []}, 0);
+  for (let i = 0; i < 4; i++) await tick();
+  assert.deepEqual(p.runCells(p.workers[0]), ['A = 1', 'B = A + 1']);
+  p.workers[0].answer('runCell', {entries: [], images: []}, 1);
+  for (let i = 0; i < 6; i++) await tick();
+  assert.deepEqual(p.runCells(p.workers[0]), ['A = 1', 'B = A + 1', 'print(B)'], 'then the Run');
+  assert.equal(p.w.qpyodideStartupPhaseDone, true);
+  p.workers[0].answer('runCell', {entries: [{type: 'stdout', message: '2'}], images: []}, 2);
+  for (let i = 0; i < 4; i++) await tick();
+  assert.ok(p.runButtons().every(b => !b.disabled), 'Run is free again');
+  p.w.close();
+});

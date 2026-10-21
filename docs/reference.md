@@ -420,7 +420,10 @@ and Run is enabled only then, as before. The plot setup (importing
 extra packages cannot be loaded, the status line says that plots are not
 available and offers **Retry**; other cells run anyway (a cell that imports
 matplotlib shows the error). After a restart, Run waits for the new start,
-and the startup cells run again from the setup cells on.
+and the startup cells run again from the setup cells on. A Run clicked while
+the setup and output cells are running waits for them. `qpyodideStartupPhaseDone`
+is true (event `qpyodide-startup-done`) once the start's setup, output and
+autorun cells have run.
 
 Core principles of this rework compared to the earlier fork
 (`Pyodide-Feedback`):
