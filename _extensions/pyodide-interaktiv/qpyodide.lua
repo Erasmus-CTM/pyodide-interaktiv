@@ -714,10 +714,14 @@ local function ensurePyodideSetup()
   -- `<i class="fa-...">` with an inline `<svg>` instead, so nothing depends
   -- on a separate font file surviving the bundling; markup elsewhere in
   -- this extension is unchanged either way.
-  quarto.doc.include_text("in-header", [[
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.46/min/vs/editor/editor.main.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
-  ]])
+  ctm.assets.use()
+  local function attribute(value)
+    return value:gsub("&", "&amp;"):gsub('"', "&quot;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+  end
+  quarto.doc.include_text("in-header",
+    '<link rel="stylesheet" href="' .. attribute(ctm.assets.url("monaco-editor", "min/vs/editor/editor.main.css")) .. '" />\n' ..
+    '<script src="' .. attribute(ctm.assets.url("font-awesome", "js/all.min.js")) .. '" defer crossorigin="anonymous"></script>')
+
 
   -- The UI translations: ctm-libs' catalogue pyodide-interaktiv (classic head
   -- scripts, before every module); qpyodide-locale.js sets globalThis.QP_L.
@@ -766,7 +770,11 @@ local function ensurePyodideSetup()
   end
 
   -- Insert the Monaco Editor initialization
-  quarto.doc.include_file("before-body", "qpyodide-monaco-editor-init.html")
+  local monaco = readTemplateFile("qpyodide-monaco-editor-init.html")
+  monaco = substitute_in_file(monaco, {
+    MONACOLOADER = attribute(ctm.assets.url("monaco-editor", "min/vs/loader.js"))
+  })
+  quarto.doc.include_text("before-body", monaco)
 
 end
 
@@ -889,6 +897,19 @@ end
 -- Whether a CodeBlock is one of this extension's `{pyodide-python}` cells.
 local function isPyodideCell(el)
   return el.attr and el.attr.classes:includes("{pyodide-python}")
+end
+
+-- Send the already-parsed cell to the umbrella's one Python AST collector.
+-- Resolve the page-global at handling time; the hook initializes it after load.
+local function collectAuthorCell(code, options)
+  if not quarto.doc.is_format("html") then return end
+  local imports = rawget(_G, "__ctmAuthorImports")
+  if imports and type(imports.add) == "function" then
+    imports.add({
+      source = code, packages = ctm.settings.list("pyodide", "packages"),
+      origin = "pyodide-interaktiv:" .. tostring(options["label"] or "") .. ":cell"
+    })
+  end
 end
 
 -- Extract Quarto code cell options from the block's text
@@ -1594,6 +1615,7 @@ end
 local function buildInteractiveCell(cellCode, markerOptions)
   local cellOptions = withoutAiOnly(mergeCellOptions(markerOptions))
   cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
+  collectAuthorCell(cellCode, cellOptions)
   return reservePendingCell(cellCode, cellOptions)
 end
 
@@ -1647,6 +1669,7 @@ local function enablePyodideCodeCell(el)
   end
 
   local cellCode, cellOptions = extractCodeBlockOptions(el)
+  collectAuthorCell(cellCode, cellOptions)
 
   -- `eval: false` (cell-level `#|` override, cascading through Quarto's own
   -- document/project default the same way `code-fold` does): a real
