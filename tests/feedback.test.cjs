@@ -14,8 +14,9 @@ function page({language='en', storage='session', hints=true, enabled=true, autos
   w.qpyodideLang = language;
   w.qpyodideFeedbackOptions = {enabled,hints,storage,uiLanguage:language};
   // The interface strings: ctm-libs' catalogue (shipped copy or CTM_LIBS_EXTENSION).
-  for (const file of ['ctm-locale.js','common.js','pyodide-interaktiv.js']) w.eval(fs.readFileSync(path.join(libs,'locales',file),'utf8'));
+  for (const file of ['ctm-locale.js','common.js','pyodide-interaktiv.js','ui.js']) w.eval(fs.readFileSync(path.join(libs,'locales',file),'utf8'));
   w.QP_L = w.CTMLocales.table('pyodide-interaktiv', language);
+  w.eval(fs.readFileSync(path.join(libs,'ui/ctm-copy.js'),'utf8'));
   if(autosave){w.qpyodideLocalStorageOptions={enabled:true,epoch:''};w.qpyodideCellDetails=[{id:'1',code:'print(80)',options:{label:'one'}}];w.eval(fs.readFileSync(path.join(ext,'qpyodide-storage.js'),'utf8'));}
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-feedback.js'),'utf8'));
   let runs = 0, execute = async () => ({entries:[{type:'stdout',message:'80'}], images:[]});

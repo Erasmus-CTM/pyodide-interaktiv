@@ -1,6 +1,6 @@
 title: pyodide-interaktiv
 author: CTM team
-version: 1.9.0
+version: 1.10.0
 quarto-required: ">=1.8.27"
 contributes:
   filters:

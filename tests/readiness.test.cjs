@@ -58,7 +58,7 @@ function page({cells = CELLS, isolated = false} = {}) {
     qpyodideFeedbackOptions: {enabled: false, storage: 'session', hints: true, uiLanguage: 'en'},
     qpyodideLocalStorageOptions: {enabled: false, epoch: ''},
   });
-  for (const file of ['locales/ctm-locale.js', 'locales/common.js', 'locales/pyodide-interaktiv.js', 'runtime/pyodide-worker.js']) w.eval(fs.readFileSync(path.join(libs, file), 'utf8'));
+  for (const file of ['locales/ctm-locale.js', 'locales/common.js', 'locales/pyodide-interaktiv.js', 'locales/ui.js', 'ui/ctm-copy.js', 'runtime/pyodide-worker.js']) w.eval(fs.readFileSync(path.join(libs, file), 'utf8'));
   for (const file of ['qpyodide-locale.js', 'qpyodide-document-status.js', 'qpyodide-worker-plugin.js', 'qpyodide-document-engine-initialization.js']) w.eval(fs.readFileSync(path.join(ext, file), 'utf8'));
   w.eval(fs.readFileSync(path.join(ext, 'qpyodide-cell-classes.js'), 'utf8') + '\nglobalThis.EditorUnitForTests = EditorUnit;');
   // Everything but Monaco's editor is the real code.

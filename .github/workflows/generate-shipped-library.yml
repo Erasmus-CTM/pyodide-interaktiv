@@ -1,0 +1,53 @@
+name: Generate the shipped library report
+# Read-only CI generation: a person publishes the verified bytes through
+# the GitHub connector. This workflow never commits or pushes.
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+    branches: [feature/shared-feedback-integration]
+  workflow_dispatch:
+    inputs:
+      library:
+        description: 'Exact reviewed ctm-libs commit (40 hex); empty uses the target/source record'
+        required: false
+        default: ''
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Resolve an immutable library commit
+        id: library
+        env:
+          REQUESTED_LIBRARY: ${{ inputs.library }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          target = pathlib.Path('.github/ctm-libs-target.json')
+          record = target if target.is_file() else pathlib.Path('.github/ctm-libs-source.json')
+          value = os.environ.get('REQUESTED_LIBRARY') or json.loads(record.read_text())['commit']
+          if not re.fullmatch('[0-9a-f]{40}', value):
+              raise SystemExit('The library must be an exact 40-hex commit.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('commit=' + value + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: Erasmus-CTM/ctm-libs
+          ref: ${{ steps.library.outputs.commit }}
+          path: _ci/ctm-libs-target
+          persist-credentials: false
+      - name: Report helper unit tests
+        run: python3 -m unittest discover -s tests -p 'test_generated_library_report.py' -v
+      - name: Generate using sync-ctm-libs.py and verify byte equality
+        run: python3 scripts/report-shipped-ctm-libs.py _ci/ctm-libs-target --out "$RUNNER_TEMP/shipped-library.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-shipped-library
+          path: ${{ runner.temp }}/shipped-library.json
