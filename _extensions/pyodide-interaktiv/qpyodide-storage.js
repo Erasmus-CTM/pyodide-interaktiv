@@ -15,9 +15,12 @@ globalThis.qpyodideStorage = (() => {
   const counts = Object.create(null);
   for (const cell of globalThis.qpyodideCellDetails || []) {
     if (["setup", "output"].includes(cell.options?.context)) continue;
-    const hash = oldHash(cell.code || ""), n = counts[hash] = (counts[hash] || 0) + 1;
-    const legacy = cell.options?.label?.trim() ? "label:" + cell.options.label.trim() :
-      "hash:" + hash + (n > 1 ? ":" + n : "");
+    const label = cell.options?.label?.trim();
+    // Old computeIdentities never counted labelled cells as hash occurrences.
+    // Counting them here would shift another cell's migrated answer.
+    const hash = oldHash(cell.code || "");
+    const n = label ? 0 : (counts[hash] = (counts[hash] || 0) + 1);
+    const legacy = label ? "label:" + label : "hash:" + hash + (n > 1 ? ":" + n : "");
     descriptors.set(String(cell.id), {
       id: cell.options?.["ctm-store-id"] || legacy,
       source: cell.options?.["ctm-store-source"] || "",

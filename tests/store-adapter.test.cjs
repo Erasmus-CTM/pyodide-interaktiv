@@ -2,7 +2,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../_extensions/pyodide-interaktiv/qpyodide-storage.js"), "utf8");
-function fixture(source, {epoch = "", enabled = true, manual = false} = {}) {
+function fixture(source, {epoch = "", enabled = true, manual = false, cells = null} = {}) {
   const values = new Map(), records = new Map(), handles = [], listeners = {}, actions = [];
   const storage = {getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) { values.set(key, String(value)); }, removeItem(key) { values.delete(key); }};
@@ -11,7 +11,7 @@ function fixture(source, {epoch = "", enabled = true, manual = false} = {}) {
     querySelectorAll() { return []; }, textContent: "", className: ""}; }
   const doc = {addEventListener(name, fn) { listeners[name] = fn; }, createElement: element, getElementById: element};
   const root = {qpyodideLang: "en", qpyodideLocalStorageOptions: {epoch},
-    qpyodideCellDetails: [{id: 1, code: "starter", options: {label: "cell", "ctm-store-id": "cell",
+    qpyodideCellDetails: cells || [{id: 1, code: "starter", options: {label: "cell", "ctm-store-id": "cell",
       "ctm-store-source": "0123456789abcdef", "ctm-store-save": true,
       "ctm-extra-source": "fedcba9876543210", "ctm-extra-save": true}}]};
   root.CTMStore = {enabled: () => enabled, setEnabled(value) { enabled = value; },
@@ -119,4 +119,22 @@ const f = fixture(source), u = f.unit();
  f.storage.getItem = () => { throw new Error("SecurityError"); };
  f.api.attach(u); expect(u.getCode() === "starter", "storage error changed editor");
  u.editor.setValue("usable"); expect(u.getCode() === "usable", "editor unusable");
+});
+
+
+test("labelled cells do not shift legacy identities of identical unlabelled cells", () => {
+const f = fixture(source, {cells: [
+  {id: 1, code: "same", options: {label: "named", "ctm-store-id": "named", "ctm-store-source": "0123456789abcdef"}},
+  {id: 2, code: "same", options: {"ctm-store-id": "first", "ctm-store-source": "0123456789abcdef"}},
+  {id: 3, code: "same", options: {"ctm-store-id": "second", "ctm-store-source": "0123456789abcdef"}}
+]});
+f.storage.setItem("qpyodide:code:/lesson.html:label:named", "named answer");
+f.storage.setItem("qpyodide:code:/lesson.html:hash:yjccrj", "first answer");
+f.storage.setItem("qpyodide:code:/lesson.html:hash:yjccrj:2", "second answer");
+const first = f.unit("2", "same"), second = f.unit("3", "same");
+f.api.attach(first); f.api.attach(second);
+expect(first.getCode() === "first answer", "first unlabelled answer shifted");
+expect(second.getCode() === "second answer", "second unlabelled answer shifted");
+expect(f.values.get("qpyodide:code:/lesson.html:label:named") === "named answer", "labelled key was deleted by another cell");
+expect(!f.values.has("qpyodide:code:/lesson.html:hash:yjccrj") && !f.values.has("qpyodide:code:/lesson.html:hash:yjccrj:2"), "migrated hash keys retained");
 });
