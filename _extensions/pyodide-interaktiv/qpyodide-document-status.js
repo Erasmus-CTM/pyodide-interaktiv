@@ -47,15 +47,74 @@ let qpyodideUserInteracted = false;
 console.log("[qpyodide-coi] initial state: " + globalThis.qpyodideInputState +
   " (crossOriginIsolated=" + globalThis.crossOriginIsolated + ")");
 
-if (!globalThis.crossOriginIsolated) {
+// The check reload, and what the page concludes when it did not help. The
+// rules, in one place:
+//  - A reload of this tab within 2 minutes of the check reload is recorded in
+//    sessionStorage (qpyodide-coi-reload-sent, with a count).
+//  - coi-serviceworker.js (ctm-libs, unchanged) ends the check from the
+//    navigation type "reload". WebKit reports a reload by location.reload()
+//    as "navigate" (seen in Playwright's WebKit, which cannot isolate with
+//    COEP credentialless either): the page was not marked unavailable,
+//    registered the worker again, got "ready" again and reloaded again,
+//    every two seconds for as long as the tab stayed open.
+//  - So a page that is ready, not isolated, and finds the record fresh
+//    concludes itself: if the worker controls it, the check failed and
+//    input() is unavailable here. If the worker does not control it (a hard
+//    reload, Ctrl+Shift+R, bypasses the worker) the check has not failed: it
+//    reloads once more (never more than two reloads within the 2 minutes).
+//  - The conclusion is kept in localStorage (qpyodide-coi-check-failed, the
+//    time) for 24 hours, then the check reload is made once more: one failure
+//    on a first visit must not switch input() and Stop off for good. The
+//    permanent verdict of coi-serviceworker.js (qpyodide-coi-unavailable-
+//    <origin>) is left alone. A page that is isolated (the server's COOP/COEP
+//    headers, as in an exam build, or the worker) deletes the conclusion.
+const QPYODIDE_COI_SENT = "qpyodide-coi-reload-sent";
+const QPYODIDE_COI_COUNT = "qpyodide-coi-reload-count";
+const QPYODIDE_COI_FAILED = "qpyodide-coi-check-failed";
+const QPYODIDE_COI_RECENT_MS = 120000;
+const QPYODIDE_COI_FAILED_MS = 24 * 60 * 60 * 1000;
+
+if (globalThis.crossOriginIsolated) {
+  try { localStorage.removeItem(QPYODIDE_COI_FAILED); } catch (ex) { /* blocked */ }
+} else {
+  function qpyodideReloadsRecently() {
+    try {
+      const sent = Number(sessionStorage.getItem(QPYODIDE_COI_SENT));
+      if (!(sent > 0 && Date.now() - sent < QPYODIDE_COI_RECENT_MS)) return 0;
+      return Math.max(1, Number(sessionStorage.getItem(QPYODIDE_COI_COUNT)) || 1);
+    } catch (ex) { return 0; /* blocked */ }
+  }
+  function qpyodideCheckFailedRecently() {
+    try {
+      const failed = Number(localStorage.getItem(QPYODIDE_COI_FAILED));
+      return failed > 0 && Date.now() - failed < QPYODIDE_COI_FAILED_MS;
+    } catch (ex) { return false; /* blocked */ }
+  }
   function qpyodideHandleCoiReady() {
     if (qpyodideUserInteracted) {
       console.log("[qpyodide-coi] ready, but the user has already interacted – reload skipped.");
       qpyodideSetInputState("needs-reload");
       return;
     }
+    if (qpyodideCheckFailedRecently()) {
+      console.log("[qpyodide-coi] the check reload did not isolate this origin within the last 24 hours – input() is unavailable here.");
+      qpyodideSetInputState("unavailable");
+      return;
+    }
+    const reloads = qpyodideReloadsRecently();
+    const controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    if (reloads && (controlled || reloads >= 2)) {
+      console.log("[qpyodide-coi] reloaded a moment ago and still not isolated – input() is unavailable here.");
+      try { localStorage.setItem(QPYODIDE_COI_FAILED, String(Date.now())); } catch (ex) { /* blocked */ }
+      qpyodideSetInputState("unavailable");
+      return;
+    }
     console.log("[qpyodide-coi] ready – triggering reload.");
-    try { sessionStorage.setItem("qpyodide-coi-reload-pending", "1"); } catch (ex) { /* blocked */ }
+    try {
+      sessionStorage.setItem("qpyodide-coi-reload-pending", "1");
+      sessionStorage.setItem(QPYODIDE_COI_SENT, String(Date.now()));
+      sessionStorage.setItem(QPYODIDE_COI_COUNT, String(reloads + 1));
+    } catch (ex) { /* blocked */ }
     location.reload();
   }
   function qpyodideHandleCoiUnavailable() {

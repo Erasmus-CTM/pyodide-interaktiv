@@ -1,0 +1,50 @@
+name: The ctm-libs to build against
+description: >
+  pyodide-interaktiv ships a generated copy of ctm-libs (_extensions/ctm-libs,
+  the forwarder _extensions/ai-feedback and its ctm-bootstrap.lua; see
+  scripts/sync-ctm-libs.py). A review commit may name another ctm-libs commit
+  in its `CTM-Review-Refs` trailer (read by the umbrella's
+  tools/ci/review-dependencies.py at the commit in .github/pins.json); then
+  that commit replaces the copy for this run, and CTM_LIBS_EXTENSION names it.
+  On main and without a trailer the shipped copy is used. Requires Python 3
+  and a checkout with the head commit (fetch-depth 2).
+outputs:
+  ctm-libs:
+    description: The review ctm-libs commit, empty for the shipped copy
+    value: ${{ steps.review.outputs['ctm-libs'] }}
+runs:
+  using: composite
+  steps:
+    - name: Pinned commits (.github/pins.json)
+      id: pins
+      shell: bash
+      run: jq -r 'to_entries[] | select(.value | type == "object") | "\(.key)=\(.value.commit)"' .github/pins.json >> "$GITHUB_OUTPUT"
+    - name: The umbrella's review-dependencies script
+      uses: actions/checkout@v4
+      with:
+        repository: Erasmus-CTM/ctm-assessment
+        ref: ${{ steps.pins.outputs['ctm-assessment'] }}
+        path: _ci/ctm-assessment
+        sparse-checkout: tools/ci
+        persist-credentials: false
+    - name: Select explicit review dependencies (main keeps the shipped copy)
+      id: review
+      shell: bash
+      env:
+        REVIEW_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: python3 _ci/ctm-assessment/tools/ci/review-dependencies.py
+    - name: Fetch the review ctm-libs
+      if: steps.review.outputs['ctm-libs']
+      uses: actions/checkout@v4
+      with:
+        repository: Erasmus-CTM/ctm-libs
+        ref: ${{ steps.review.outputs['ctm-libs'] }}
+        path: _ci/ctm-libs-review
+        persist-credentials: false
+    - name: Use it instead of the shipped copy (this run only)
+      if: steps.review.outputs['ctm-libs']
+      shell: bash
+      run: python3 scripts/sync-ctm-libs.py _ci/ctm-libs-review
+    - name: CTM_LIBS_EXTENSION
+      shell: bash
+      run: echo "CTM_LIBS_EXTENSION=$GITHUB_WORKSPACE/_extensions/ctm-libs" >> "$GITHUB_ENV"

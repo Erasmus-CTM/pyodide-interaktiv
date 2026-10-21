@@ -1,10 +1,13 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom');
 const ext=path.join(__dirname,'../_extensions/pyodide-interaktiv');
+const libs=process.env.CTM_LIBS_EXTENSION||path.join(__dirname,'../_extensions/ctm-libs');
 for(const shared of [true,false]) test('upstream autosave controls retain code and work '+(shared?'in the shared feedback dialog':'without AI feedback'),()=>{
  const w=new JSDOM('<div id="qpyodide-status-right"></div>',{url:'https://course.invalid/page',runScripts:'outside-only'}).window;
- if(shared)for(const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js'])w.eval(fs.readFileSync(path.join(process.env.AI_FEEDBACK_EXTENSION || path.join(__dirname,'../_extensions/ai-feedback'),file),'utf8'));
+ if(shared)for(const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js'])w.eval(fs.readFileSync(path.join(libs,'feedback',file),'utf8'));
  w.qpyodideLang='en';w.qpyodideLocalStorageOptions={enabled:true,epoch:''};w.qpyodideCellDetails=[{id:'one',code:'print(1)',options:{label:'one'}}];
- for(const file of ['qpyodide-locales.js','qpyodide-storage.js','qpyodide-storage-settings.js'])w.eval(fs.readFileSync(path.join(ext,file),'utf8'));
+ for(const file of ['ctm-locale.js','common.js','pyodide-interaktiv.js'])w.eval(fs.readFileSync(path.join(libs,'locales',file),'utf8'));
+ w.QP_L=w.CTMLocales.table('pyodide-interaktiv','en');
+ for(const file of ['qpyodide-storage.js','qpyodide-storage-settings.js'])w.eval(fs.readFileSync(path.join(ext,file),'utf8'));
  const storage=w.qpyodideStorage;storage.save('one','draft');
  const section=w.document.querySelector('.qpyodide-storage-settings-section'),master=section.querySelector('input[type=checkbox]');
  master.click();assert.equal(storage.isUserDisabled(),true);assert.equal(storage.load('one'),'draft');

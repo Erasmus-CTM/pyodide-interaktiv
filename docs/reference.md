@@ -57,7 +57,7 @@ Can be disabled via `feedback-hints: false`.
 | `read-only` | `false` | make the editor read-only (no Feedback button) |
 | `autorun` | — | `true`: run the code automatically after Pyodide starts |
 | `code-fold` | — | `true`/`1`/`hide`: cell starts collapsed; `false`/`0`/`show`: starts expanded. Falls back to the document's `code-fold:` when unset |
-| `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset |
+| `pdf-fallback` | — | `true`/`python`: in non-interactive formats (PDF, docx, …) show the cell as plain, Python-highlighted source instead of raw text; `false`: keep the old unstyled pass-through. Falls back to the document's `pyodide: pdf-fallback:` when unset. Markdown outputs always show the source |
 | `<format>-autoexec` | — | `true`: for that one output format (e.g. `pdf-autoexec`, `html-autoexec`), actually *run* the cell via a local `python3`/`python` and show its real output instead of the interactive editor/`pdf-fallback`. Falls back to the document's `pyodide: <format>-autoexec:` when unset |
 | `label` | — | unique ID of the cell (`data-id` attribute) |
 | `classes` | — | additional CSS classes |
@@ -86,6 +86,22 @@ pyodide:
 Packages imported in the code are additionally loaded on demand by Pyodide
 (`loadPackagesFromImports`). `requests`/`urllib3` are shimmed via
 `pyodide_http`, so `pd.read_csv(url)` works directly.
+
+**How the options combine (1.9).** On HTML pages the `pyodide:` options are
+read key by key: `_quarto.yml`, the active profiles, `_quarto.yml.local`,
+the `_metadata.yml` files and the page's front matter each contribute their
+keys, the nearest winning, so a page that sets `pyodide: lang: de` keeps the
+project's `feedback: false` (before 1.9 a page's own `pyodide:` map replaced
+the project's). The on/off options (`show-startup-message`, `feedback`,
+`feedback-hints`, `local-storage`, `html-autoexec`) take `true`, `false`,
+`1` or `0`; any other value warns once and uses the default (before, a
+value such as `feedback: yes` broke the page's script). A key that looks
+like a credential (`api-key`, `token`, `secret`, …) stops the render:
+Quarto metadata is published with the site. PDF, docx and the other
+formats read the options as before (`pdf-fallback: python`, `1`, `0`).
+`base-url` and `build-variant` pin a project's own Pyodide; without them the
+page uses the version of ctm-libs (the one the other CTM components grade
+with).
 
 Quarto's own standard `code-fold:` (document, profile, or project
 `_quarto.yml`) sets the default open/closed state of every interactive
@@ -145,7 +161,8 @@ format.
 ## UI language
 
 Shipped languages: **English (`en`)**, **German (`de`)**, **Swedish (`sv`)**,
-**Norwegian Bokmål (`no`, also as `nb`)**, and **Danish (`da`)**.
+**Norwegian Bokmål (`nb`, also as `no`; Nynorsk `nn` shows Bokmål)**, and
+**Danish (`da`)**.
 **The default is English** – without any setting, the UI appears in English.
 Any additional language can be added yourself, see
 [Adding another language](#adding-another-language).
@@ -153,8 +170,9 @@ Any additional language can be added yourself, see
 The extension reads the language in this order:
 
 1. `pyodide: lang:` – explicit override
-2. **Quarto's own `lang:`** – the normal case
-3. `en` – fallback
+2. `ctm-assessment: lang:` – the language of every CTM component at once
+3. **Quarto's own `lang:`** – the normal case
+4. `en` – fallback
 
 Quarto's standard key is therefore enough; no extra option is needed:
 
@@ -169,6 +187,7 @@ filters:
 
 Regional variants are shortened (`de-DE` → `de`). An unsupported language
 (e.g. `fr`) silently falls back to English and does **not** break rendering.
+The resolved code is `globalThis.qpyodideLang` (`nb` for `no`).
 
 All visible text is translated – toolbar, status line, the `input()`
 panel, the AI feedback panel, and error messages – as well as the
@@ -201,78 +220,19 @@ therefore also switches the extension's language automatically.
 
 ### Adding another language
 
-All visible text lives in **one** place:
-`_extensions/pyodide-interaktiv/qpyodide-locales.js`. It has one block per
-language (`en`, `de`, `sv`, `no`, `da`) with an identical set of keys.
-
-**1. Create a language block.** Copy the `en` or `de` block, change the
-language code, and translate the values. **All** keys must be present –
-if one is missing, that label will later be `undefined`.
-
-Only what a human reads gets translated. These stay unchanged:
-
-| Stays unchanged | Example |
-|---|---|
-| HTML markup and CSS classes | `<i class="fa-solid fa-play">`, `<strong>` |
-| Element IDs (referenced by JavaScript) | `qpyodide-coi-check-btn`, `qpyodide-coi-check-hint` |
-| Python and web identifiers | `input()`, `SharedArrayBuffer`, `Atomics.wait()` |
-| API field names and URLs | `Base URL`, `choices[0].message.content` |
-
-Five entries are **functions**, not strings (`engineFailed`,
-`feedbackHintLevel`, `modelChoose`, `errModelListFailed`,
-`modelHintKeyNeeded`); `hintInstructions` is an object with levels `1`–`3`.
-This structure must be preserved – only the text inside gets translated.
-
-Two content requirements in the `systemPrompt`: the instruction to answer
-**in the respective language**, and the length limit of **about 250
-words**, must be present in every language – otherwise AI feedback gets
-cut off mid-sentence.
-
-**2. Register the language code.** In
-`_extensions/pyodide-interaktiv/qpyodide.lua`, add it in two places:
-
-```lua
-local supportedLangs = {
-  ["en"] = true,
-  ["fr"] = true          -- new
-}
-
-local noscriptMessages = {
-  en = "Please enable JavaScript …",
-  fr = "Veuillez activer JavaScript …"   -- new
-}
-```
-
-Without an entry in `supportedLangs`, the filter silently falls back to
-English, even if the block exists in the JS file.
-
-**3. Multiple codes for the same language** (optional). Norwegian shows
-the pattern: the block is called `no`, but is also reachable as `nb`. For
-that, there's an alias line at the end of `qpyodide-locales.js`, and
-**both** codes are in `supportedLangs`:
-
-```js
-globalThis.qpyodideLocales.nb = globalThis.qpyodideLocales.no;
-```
-
-**4. Verify.** Regional variants are shortened to the base code (`sv-SE` →
-`sv`); an unknown code silently falls back to English. Whether the new
-block is complete can be checked against `en`:
-
-```bash
-deno eval "eval(Deno.readTextFileSync('_extensions/pyodide-interaktiv/qpyodide-locales.js'));
-const L = globalThis.qpyodideLocales, base = Object.keys(L.en);
-for (const l of Object.keys(L))
-  console.log(l, base.filter(k => !(k in L[l])).join(', ') || 'complete');"
-```
-
-Then `deno check _extensions/pyodide-interaktiv/qpyodide-locales.js`
-(syntax check) and a test render with `lang: <code>`.
-
-> `deno` doesn't need to be installed separately – Quarto ships it, on
-> Windows under `%LOCALAPPDATA%\Programs\Quarto\bin\tools\x86_64\deno.exe`,
-> on macOS/Linux in the corresponding `bin/tools` directory of the Quarto
-> installation.
+All visible text lives in **one** place, the message catalogue
+`pyodide-interaktiv` of ctm-libs (`_extensions/ctm-libs/locales/pyodide-interaktiv.js`,
+shipped here as a generated copy; the CTM Assessment package has the same
+file). Each language is a block with the same keys as `en`; values may hold
+HTML, and `engineFailed` and `setupFailed` are templates with the argument
+`{msg}`. A new language is a pull request to
+[ctm-libs](https://github.com/Erasmus-CTM/ctm-libs): add the code to
+`$languages` and the block with every key, then run
+`python scripts/check-locales.py` there (format, completeness, arguments).
+Only what a human reads gets translated: HTML markup and CSS classes,
+element IDs (`qpyodide-coi-check-btn`), Python and web identifiers
+(`input()`, `SharedArrayBuffer`) stay as they are. Once ctm-libs has it,
+`python scripts/sync-ctm-libs.py` brings it here.
 
 ---
 
@@ -425,16 +385,46 @@ If a cell's last statement returns an HTML string, it's embedded as HTML –
 
 ```
 _extensions/pyodide-interaktiv/
-  qpyodide.lua                                 Pandoc Lua filter (injects everything)
-  qpyodide-document-settings.js                Template: document-wide settings
+  qpyodide.lua                                 Pandoc Lua filter (adds everything)
+  ctm-bootstrap.lua                            Finds ctm-libs (generated copy, byte-identical in every CTM component)
+  qpyodide-document-settings.js                Template: document-wide settings (inline classic script)
+  qpyodide-locale.js                           QP_L: the UI text (ctm-libs' catalogue) in the page's language
   qpyodide-document-status.js                  Status line in the title block
-  qpyodide-feedback.js                         AI feedback: settings UI + API client
-  qpyodide-document-engine-initialization.js   Pyodide worker (boot, RPC, interrupt/restart)
+  qpyodide-feedback.js                         AI feedback adapter (ctm-libs' feedback)
+  qpyodide-worker-plugin.js                    This extension's part of the worker: runCell, plots, input() prompt
+  qpyodide-document-engine-initialization.js   Starts the worker (ctm-libs' CTMWorker), status, restart
+  qpyodide-canvas-plots.js                     Interactive plots (second Pyodide on the main thread)
+  qpyodide-storage.js, qpyodide-storage-settings.js   Local-storage autosave
   qpyodide-monaco-editor-init.html             Monaco loader
   qpyodide-cell-classes.js                     EditorUnit + interactive/output/setup cells
   qpyodide-cell-initialization.js              Build cells, kick off the startup phase
   qpyodide-styling.css                         Styling on top of Bootstrap variables
+_extensions/ctm-libs/                          Generated copy of ctm-libs (see installation)
 ```
+
+The CSS and the modules are cacheable files (HTML dependencies
+`pyodide-interaktiv` and, with feedback on, `pyodide-interaktiv-feedback`);
+only the page's settings and cells are inline. The interface strings are
+ctm-libs' catalogue `pyodide-interaktiv`; the Python worker, its RPC and
+`coi-serviceworker.js` are ctm-libs' (`runtime/pyodide-worker.js`,
+`CTMWorker`), shared with the other CTM components.
+
+**Start-up in two stages.** First the interpreter (and `pyodide: packages`,
+which a check may import): `qpyodideReady` resolves, and other components'
+checks on the page can run. Then pyodide_http, micropip and matplotlib load
+in the background without getting in a check's way: they download in small
+pieces that pause while a check downloads, and install while nothing else
+runs. This extension's cells wait for both: the status line says "Ready"
+and Run is enabled only then, as before. The plot setup (importing
+`pyplot`) runs with the first cell run, startup cells included. If the
+extra packages cannot be loaded, the status line says that plots are not
+available and offers **Retry**; other cells run anyway (a cell that imports
+matplotlib shows the error). After a restart, Run waits for the new start,
+and the startup cells run again from the setup cells on. A Run clicked during
+the startup phase waits for it; Runs clicked on several cells then run in
+click order. `qpyodideStartupPhaseDone`
+is true (event `qpyodide-startup-done`) once the start's setup, output and
+autorun cells have run.
 
 Core principles of this rework compared to the earlier fork
 (`Pyodide-Feedback`):
@@ -450,9 +440,9 @@ Core principles of this rework compared to the earlier fork
 - No more *silent* model guessing and no Flask backend branch; instead an
   explicit **"Fetch models"** button with a free-tier filter.
 - `pyodide: packages:` works again (micropip installation on startup);
-  `setup`/`output` cells and `autorun` actually run after boot.
-- matplotlib renders in the worker via the AGG backend; plots come back as
-  PNG (instead of a live canvas in the main thread).
+  `setup`/`output` cells and `autorun` actually run after start-up.
+- matplotlib renders in the worker via the AGG backend (`MPLBACKEND=AGG`);
+  plots come back as PNG (instead of a live canvas in the main thread).
 - Theme adaptation: CSS via `var(--bs-…)`, Monaco switches live between
   `vs`/`vs-dark` (Quarto dark mode / `prefers-color-scheme`).
 - Model output is rendered escaped (mini-Markdown); errors appear as a
@@ -467,7 +457,16 @@ compatible with
 [Erasmus-CTM/py-exercise](https://github.com/Erasmus-CTM/Py-Exercise),
 which must come **after** this extension in the filter list. Direct
 Pyodide internals (e.g. `pyodide.FS`) are no longer reachable from the main
-thread, since the runtime lives in the worker.
+thread, since the runtime lives in the worker. The contract is ctm-libs'
+(`CTMWorker`, its docs/api.md).
+
+Since 1.9 they mean **the interpreter is ready** (the first stage); the
+extra packages may still be loading (`proxy.whenSetup` resolves after them).
+`globalThis.qpyodideCellsReady` (and the window event
+`qpyodide-cells-ready`) tell when this extension's own cells may run.
+`qpyodideLang` is the resolved language (`nb`, not `no`); the global
+`qpyodideLocales` is gone (`QP_L` keeps its keys). Learner code sees
+`MPLBACKEND=AGG` in `os.environ`.
 
 ---
 
@@ -484,6 +483,16 @@ thread, since the runtime lives in the worker.
 - The runtime is reloaded when navigating to another page of the project.
   Possible extension: a **SharedWorker**, to keep Pyodide alive across
   page navigations.
+- The first cell run includes the plot setup (importing `pyplot`, about a
+  second or two), which before 1.9 happened before Run was enabled.
+- The background download relies on the browser's cache: a private window
+  does not keep the 6.7 MB matplotlib wheel in its in-memory cache, and with
+  the cache switched off in the developer tools nothing is kept; then a
+  check started early can wait for that download.
+- Markdown output (`format: gfm`, `commonmark`, …) shows the cells as
+  highlighted Python source, as `pdf-fallback` does, whatever `pdf-fallback`
+  says, with one build warning per page: the cells need the page's scripts,
+  which only HTML output carries.
 - `embed-resources: true` gives a single working file, but not an offline
   one. The extension's own assets (Monaco, Font Awesome, the CSS and JS)
   are inlined, so icons and the editor come up with no external files – but
@@ -538,7 +547,8 @@ thread, since the runtime lives in the worker.
 
 `input()` requires `SharedArrayBuffer`, which browsers only expose under
 *cross-origin isolation* for security reasons (Spectre protection). A
-bundled service worker (`coi-serviceworker.js`) sets up this isolation
+bundled service worker (`coi-serviceworker.js`, from ctm-libs; the file is
+unchanged, so browsers see no service-worker update) sets up this isolation
 automatically by attaching two headers to all responses on the page:
 
 | Header | Value | Effect |
@@ -568,6 +578,21 @@ page:
   corresponding notice. This is not a security problem but a
   compatibility one.
 
+### The check reload
+
+A page that is not yet isolated reloads itself once, when the worker is
+ready, so that the worker's headers apply. The rule:
+
+- At most one check reload per tab. After a hard reload (which bypasses the
+  worker) one more is made, never more than two within two minutes.
+- Still not isolated after the check reload, with the worker in control: the
+  check has failed, and `input()` and **Stop** are unavailable on this page.
+  The page remembers this in `localStorage` (`qpyodide-coi-check-failed`) for
+  24 hours; during that time new tabs do not check again. After 24 hours the
+  check reload is made once more.
+- A page that is isolated (the worker, or the server's COOP/COEP headers, as
+  in an exam build) deletes the remembered failure.
+
 **There is no security risk for students:** either `input()` works (with
 security-enhancing COI isolation), or the browser blocks the service
 worker and `input()` is simply unavailable – the browser remains equally
@@ -577,9 +602,10 @@ protected in both cases.
 
 ## Shared AI feedback (integration branch)
 
-The shared `ai-feedback` extension is installed together with this one (the
-repository ships a copy; see [installation](installation.md)). The Pyodide filter
-loads it automatically; existing filter lists need no extra entry. The
+AI feedback is part of ctm-libs, which is installed together with this
+extension (the repository ships a copy; see [installation](installation.md)).
+The Pyodide filter loads it automatically; existing filter lists need no
+extra entry. The
 gear opens one shared settings dialog for all exercises on the page; copy-prompt
 mode is the default. Previously saved Pyodide credentials are offered for explicit
 import in that dialog. Settings storage follows `ai-feedback: storage:` when it
@@ -603,13 +629,22 @@ editor. Run, Stop, input, plots, setup/output, autorun, readonly and additional
 editors keep their execution behavior.
 
 Feedback follows the selected English, German, Swedish, Norwegian or Danish
-language (`nb` is a Norwegian alias); teaching instructions live in shared YAML. Shared settings support English, German and
+language (`no` is read as `nb`); teaching instructions live in shared YAML. Shared settings support English, German and
 Norwegian for these locales; Swedish and Danish use English shared controls.
 `feedback: false` removes the feedback dependency (unless the page has
-`.ai-feedback` activities); `feedback-hints: false` uses
+`.ai-feedback` activities); a page without Pyodide cells or activities loads
+nothing of this extension. **A build without AI feedback**
+(`ai-feedback: enabled: false` or `CTM_FEEDBACK=off`) switches Pyodide's
+feedback off in any filter order and writes none of the AI-only fields
+(`task`, `feedback-policy`, `feedback-context`, the policy selection and
+context) into the page; a cell with `#| task:` stays a runnable cell, and an
+explicit `pyodide: feedback: true` is named once in the build message.
+`feedback-hints: false` uses
 review mode. `npm ci && npm test` runs adapter and execution-boundary regressions. In VS Code, **Terminal → Run Task…** offers the same commands (`.vscode/tasks.json`): the default test task runs the tests, the default build task renders and then tests.
-The tests use the shipped `_extensions/ai-feedback`; set `AI_FEEDBACK_EXTENSION`
-to another installed ai-feedback directory to test against it.
+The tests use the shipped `_extensions/ctm-libs`; set `CTM_LIBS_EXTENSION`
+to another ctm-libs extension folder to test against it, and
+`CTM_LEGACY_AI_FEEDBACK` to an ai-feedback 0.8.1 extension folder for the
+tests of old projects (CI checks it out).
 The workbench in `Erasmus-CTM/ctm-assessment` pins this feature branch before any
 consumer migration PR.
 
@@ -631,11 +666,11 @@ Run/Check resets by default; select `reset-on-run: false` to preserve progressio
 Explicit Reset always restarts it. The old `prompt`, authored `defaults` and
 `integrations` forms are rejected.
 
-See the [shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/feedback-policies.md).
+See the [shared policy guide](https://github.com/Erasmus-CTM/ctm-libs/blob/main/docs/feedback-policies.md).
 
 ### Standalone example
 
-`example.qmd` demonstrates this package with shared feedback. Run `quarto render example.qmd` (the shipped ai-feedback is used). No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
+`example.qmd` demonstrates this package with shared feedback. Run `quarto render example.qmd` (the shipped ctm-libs is used). No other integration extension is required. The example builds automatically on pushes and pull requests; download the `standalone-example` Actions artifact. Feedback defaults to copy mode, which needs no API key.
 
 ### Page and exercise feedback policies
 
@@ -647,7 +682,7 @@ behavior. The same named policy can be reused across integrations.
 YAML `ai-feedback.exercises.<integration>.<label>` targets one authored label;
 an explicit named selection takes precedence over that entry. Omitted settings
 inherit; `steps` replaces the entire list. See the
-[shared policy guide](https://github.com/Erasmus-CTM/ai-feedback/blob/main/docs/feedback-policies.md).
+[shared policy guide](https://github.com/Erasmus-CTM/ctm-libs/blob/main/docs/feedback-policies.md).
 
 
 ### Local-storage autosave (`local-storage`)

@@ -1,3 +1,9 @@
+-- ctm-libs, the library of CTM Assessment: the one next to this extension,
+-- in the CTM Assessment package or in the copy this extension ships
+-- (`quarto add Erasmus-CTM/pyodide-interaktiv` installs it). ctm.feedback is
+-- touched only inside the filter functions (step-3 design §18.4).
+local ctm = dofile(quarto.utils.resolve_path("ctm-bootstrap.lua"))("pyodide-interaktiv",
+  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 2})
 local feedback = nil
 ----
 --- qpyodide.lua – Pandoc Lua filter of the `pyodide-interaktiv` extension
@@ -6,20 +12,24 @@ local feedback = nil
 --- provider-neutral AI feedback (OpenAI-compatible APIs).
 ---
 --- The filter collects all `{pyodide-python}` code blocks, replaces them with
---- insertion markers, and injects the extension's JS/CSS files exactly once
---- per document. Everything runs entirely client-side (Pyodide/WebAssembly).
+--- insertion markers, and adds the extension's files exactly once per
+--- document. Everything runs entirely client-side (Pyodide/WebAssembly).
 ---
---- Injected files (order matters):
----   in-header : qpyodide-styling.css
----               qpyodide-document-settings.js   (template, placeholders get replaced)
----               qpyodide-locales.js             (UI text per language; defines QP_L)
----               qpyodide-document-status.js
----               qpyodide-feedback.js
----               qpyodide-document-engine-initialization.js
----               qpyodide-canvas-plots.js        (interactive plots, second instance)
+--- What a page with cells gets (order matters):
+---   head, dependencies (cacheable files; ctm-libs first):
+---     ctm-runtime, ctm-worker   ctm-libs' Python runtime and worker (CTMWorker)
+---     ctm-locale, ctm-locale-pyodide-interaktiv   the interface strings
+---     pyodide-interaktiv        qpyodide-styling.css and the modules below
+---     pyodide-interaktiv-feedback   qpyodide-feedback.js (feedback on only)
+---   head, inline: coi-serviceworker.js's tag, Monaco's CSS, Font Awesome,
+---     qpyodide-document-settings.js (template, placeholders get replaced;
+---     a classic script, data only: it runs before every module)
+---   modules, in this order: qpyodide-locale.js (QP_L), qpyodide-storage.js,
+---     qpyodide-document-status.js,
+---     qpyodide-storage-settings.js, qpyodide-worker-plugin.js,
+---     qpyodide-document-engine-initialization.js, qpyodide-canvas-plots.js
 ---   before-body: qpyodide-monaco-editor-init.html
----   after-body : qpyodide-cell-classes.js
----                qpyodide-cell-initialization.js
+---   after-body : qpyodide-cell-classes.js, qpyodide-cell-initialization.js
 ---
 --- A cell/document can also opt into `*-autoexec` (e.g. `pdf-autoexec`,
 --- `html-autoexec`): instead of the interactive editor or a highlighted
@@ -42,15 +52,13 @@ local hasDonePyodideSetup = false
 -- Default values taken from:
 -- https://pyodide.org/en/stable/usage/api/js-api.html#globalThis.loadPyodide
 
--- Define a base compatibile version
-local baseVersionPyodide = "0.28.3"
-
--- Define where Pyodide can be found. Default:
--- https://cdn.jsdelivr.net/pyodide/v0.z.y/full/
--- https://cdn.jsdelivr.net/pyodide/v0.z.y/debug/
-local baseUrl = "https://cdn.jsdelivr.net/pyodide/v".. baseVersionPyodide .."/"
+-- Where Pyodide can be found: ctm-libs' one Pyodide constant (E12; checks and
+-- cells run on the same version), e.g.
+-- https://cdn.jsdelivr.net/pyodide/v0.28.3/full/; `pyodide: base-url:` and
+-- `build-variant:` still pin a project's own (e.g. .../v0.28.3/debug/).
+local indexURL = ctm.runtime.indexURL()
 local buildVariant = "full/"
-local indexURL = baseUrl .. buildVariant
+local baseUrl = indexURL:sub(-#buildVariant) == buildVariant and indexURL:sub(1, -#buildVariant - 1) or indexURL
 
 -- Backend for interactive Matplotlib plots (qpyodide-canvas-plots.js).
 -- WebAgg needs the browser patch that Pyodide ships from 0.28 on; without it
@@ -97,29 +105,9 @@ local installPythonPackagesList = "''"
 ----
 --- Setup variables for localization (i18n)
 
--- Active UI language. Resolved per render pass from `pyodide: lang:` or Quarto's
--- own `lang:`; see resolveLang(). Default: English.
+-- Active UI language: a code of ctm-libs' catalogue pyodide-interaktiv (en,
+-- de, sv, nb, da). Resolved per render pass by resolveLang(). Default: English.
 local lang = "en"
-
--- Supported locales. Extend this set together with qpyodide-locales.js.
-local supportedLangs = {
-  ["en"] = true,
-  ["de"] = true,
-  ["sv"] = true,
-  ["no"] = true,
-  ["nb"] = true,
-  ["da"] = true
-}
-
--- Noscript message per locale
-local noscriptMessages = {
-  en = "Please enable JavaScript to experience the dynamic code cell content on this page.",
-  de = "Bitte JavaScript aktivieren, um die interaktiven Code-Zellen dieser Seite zu nutzen.",
-  sv = "Aktivera JavaScript för att kunna använda de interaktiva kodcellerna på den här sidan.",
-  no = "Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden.",
-  nb = "Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden.",
-  da = "Slå JavaScript til for at kunne bruge de interaktive kodeceller på denne side."
-}
 
 ----
 --- Setup variables for the AI feedback feature
@@ -315,6 +303,28 @@ function table.clone(original)
   return shallowcopy(original)
 end
 
+-- P22 / E3: AI feedback is off for this build (ai-feedback: enabled: false,
+-- CTM_FEEDBACK=off). Then a cell gets no AI-only fields: neither the
+-- options task, feedback-policy and feedback-context (their empty defaults
+-- included) nor the policy selection and learning context. A cell with
+-- `#| task:` stays an ordinary runnable cell. The policy name is still
+-- checked, so both builds fail alike.
+local aiOff = false
+local AI_ONLY_OPTIONS = {"task", "feedback-policy", "feedback-context"}
+local function withoutAiOnly(options)
+  if aiOff then
+    for _, key in ipairs(AI_ONLY_OPTIONS) do options[key] = nil end
+  end
+  return options
+end
+local function addFeedbackFields(block, options, contextBlock)
+  if not feedback then return end
+  local selection = feedback.selection(block, options)
+  if aiOff then return end
+  options.policySelection = selection
+  options.feedbackContext = feedback.context(contextBlock or block, options, true)
+end
+
 local function mergeCellOptions(localOptions)
   -- Copy default options to the mergedOptions table
   local mergedOptions = table.clone(qPyodideDefaultCellOptions)
@@ -345,38 +355,41 @@ end
 -- ----
 -- ```
 --
--- Determine the UI language for this render pass.
---
--- Order of precedence:
---   1. `pyodide: lang: xx`  – explicit override
---   2. Quarto's own `lang:` – set per profile in a multilingual project
---   3. "en"                 – fallback
---
--- Region subtags are dropped ("de-DE" -> "de"); unsupported languages fall back
--- to English instead of failing the render.
+-- Determine the UI language for this render pass (ctm.locale, one resolver
+-- for every CTM component): `pyodide: lang`, then `ctm-assessment: lang`
+-- (HTML), then Quarto's own `lang`, then English; then the first language of
+-- that tag's chain the catalogue has ("de-DE" -> de, "no" and "nn" -> nb,
+-- unsupported -> en). Other formats read `pyodide: lang` from Quarto's map.
 local function resolveLang(meta)
+  if quarto.doc.is_format("html") then
+    return (ctm.locale.resolve("pyodide-interaktiv"))
+  end
   local raw = nil
-
   local pyodide = meta.pyodide
   if isVariablePopulated(pyodide) and isVariablePopulated(pyodide["lang"]) then
     raw = pandoc.utils.stringify(pyodide["lang"])
   elseif isVariablePopulated(meta["lang"]) then
     raw = pandoc.utils.stringify(meta["lang"])
   end
-
-  if raw == nil or raw == "" then
-    return "en"
-  end
-
-  local base = raw:lower():match("^(%a+)")
-  if base and supportedLangs[base] then
-    return base
-  end
-
-  return "en"
+  return ctm.locale.language("pyodide-interaktiv", raw or "en")
 end
 
-local function setPyodideInitializationOptions(meta)
+-- The URL parts: the scripts load indexURL .. "pyodide.mjs", so both parts
+-- must end in "/". The documented `build-variant: full` (and a base-url typed
+-- without its trailing slash) would otherwise yield ".../fullpyodide.mjs".
+local function setIndexURL()
+  local function directory(part)
+    if part ~= "" and part:sub(-1) ~= "/" then
+      return part .. "/"
+    end
+    return part
+  end
+  indexURL = directory(baseUrl) .. directory(buildVariant)
+end
+
+-- `pyodide:` in formats other than HTML (PDF, docx, Markdown, ...): Quarto's
+-- merged map, read as before 1.9 (pdf-fallback and *-autoexec act there).
+local function setPyodideOptionsFromMeta(meta)
 
   -- Resolve the language first: it must also work for documents that have no
   -- `pyodide:` block at all, so this happens before the early return below.
@@ -402,16 +415,7 @@ local function setPyodideInitializationOptions(meta)
   end
 
   if isVariablePopulated(pyodide["build-variant"]) or isVariablePopulated(pyodide["base-url"]) then
-    -- The scripts load indexURL .. "pyodide.mjs", so both parts must end in
-    -- "/". The documented `build-variant: full` (and a base-url typed without
-    -- its trailing slash) would otherwise yield ".../fullpyodide.mjs".
-    local function directory(part)
-      if part ~= "" and part:sub(-1) ~= "/" then
-        return part .. "/"
-      end
-      return part
-    end
-    indexURL = directory(baseUrl) .. directory(buildVariant)
+    setIndexURL()
   end
 
   -- The WebAssembly user's home directory and initial working directory. Default: '/home/pyodide'
@@ -486,6 +490,82 @@ local function setPyodideInitializationOptions(meta)
   return meta
 end
 
+local pageHasCells = false
+-- pyodide: feedback, whatever the build: the cells' policy names are checked
+-- in both builds (feedback.selection), so both fail alike.
+local feedbackWanted = true
+
+-- `pyodide:` on HTML pages (1.9): ctm-libs' settings reader combines the
+-- section key by key across _quarto.yml, profiles, _metadata.yml and the
+-- page (F-79), and stops the render for credential-like keys (A1). Every
+-- value keeps the meaning it had (step-3 design §18.2): the on/off options
+-- take true, false, 1 and 0; a value that broke the page's script before
+-- (`feedback: yes`) now warns once and uses the default. Empty values count
+-- as unset, as before.
+local function setPyodideOptionsFromSettings(meta)
+  lang = resolveLang(meta)
+  local S = ctm.settings
+  local function text(key)
+    local value = S.string("pyodide", key)
+    if value ~= nil and value ~= "" then return value end
+    return nil
+  end
+  local function onOff(key, default)
+    local value = S.get("pyodide", key)
+    if value == nil or value == "" then return default end
+    return (S.bool("pyodide", key, {loose = true, digits = true, default = default}))
+  end
+
+  local base, variant = text("base-url"), text("build-variant")
+  if base then
+    baseUrl = base
+    canvasBackend = canvasBackendForUrl(baseUrl)
+  end
+  if variant then buildVariant = variant end
+  if base or variant then setIndexURL() end
+  homeDir = text("home-dir") or homeDir
+  showStartUpMessage = tostring(onOff("show-startup-message", true))
+  -- Feedback is on unless pyodide: feedback: false, and only in builds with
+  -- AI feedback (P22, asked directly: no dependence on the filter order). An
+  -- explicit pyodide: feedback: true on a page with cells is a request, which
+  -- a build without AI feedback names in its message once; the default is
+  -- no request.
+  local wanted = onOff("feedback", true)
+  feedbackWanted = wanted
+  local explicit, origin = S.get("pyodide", "feedback")
+  if wanted and explicit ~= nil and pageHasCells then
+    wanted = ctm.feedback.request("pyodide-interaktiv", true, "pyodide: feedback: true" .. (origin and (" in " .. origin) or ""))
+  elseif wanted then
+    wanted = ctm.feedback.enabled()
+  end
+  aiOff = not ctm.feedback.enabled()
+  feedbackEnabled = tostring(wanted)
+  feedbackHints = tostring(onOff("feedback-hints", true))
+  feedbackStorage = text("feedback-storage") or feedbackStorage
+  pdfFallback = text("pdf-fallback") or pdfFallback
+  localStorageEnabled = tostring(onOff("local-storage", false))
+  localStorageEpoch = text("local-storage-epoch") or localStorageEpoch
+  -- Only the active format's key is read (html-autoexec).
+  local autoexecKey = "html-autoexec"
+  if onOff(autoexecKey, false) then autoexecDocDefaults[autoexecKey] = "true" end
+  local packages = {}
+  for _, name in ipairs((S.list("pyodide", "packages"))) do
+    table.insert(packages, "'" .. name .. "'")
+  end
+  if #packages > 0 then installPythonPackagesList = table.concat(packages, ", ") end
+  return meta
+end
+
+-- This extension's version (its manifest), the version of its HTML
+-- dependencies: a new release is a new URL, so browsers fetch it.
+local versionFound = nil
+local function extensionVersion()
+  if versionFound then return versionFound end
+  local file = io.open(quarto.utils.resolve_path("_extension.yml"), "r")
+  versionFound = file and file:read("*a"):match("\nversion:%s*['\"]?([%w%.%-]+)") or "0"
+  if file then file:close() end
+  return versionFound
+end
 
 -- Read a file that lives next to this .lua filter (resolved via Quarto's path API).
 local function readTemplateFile(template)
@@ -524,7 +604,7 @@ local function initializationPyodide()
   local substitutions = {
     ["INDEXURL"] = indexURL,
     ["CANVASBACKEND"] = canvasBackend,
-    ["HOMEDIR"] = homeDir,
+    ["HOMEDIR"] = jsStringEscape(homeDir),
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
     ["QPYODIDECELLDETAILS"] = cellDetails,
@@ -602,62 +682,14 @@ local function ensurePyodideSetup()
   -- Otherwise, let's include the initialization script _once_
   hasDonePyodideSetup = true
 
-  -- COI service worker: copy the file into the site root and register it in
-  -- the browser. Enables SharedArrayBuffer (and thus real input()) on HTTPS
-  -- hosts like GitHub Pages, without server-side COOP/COEP header config.
-  --
-  -- Important: io.open() with a relative path writes relative to the
-  -- directory of the document CURRENTLY being rendered, not to the project
-  -- root. In website projects with subfolders (e.g. Chapter_1/, Chapter_2/,
-  -- ...), the file would otherwise end up scattered across the source tree
-  -- (e.g. Qmd-Files/Chapter_1/coi-serviceworker.js) instead of in the actual
-  -- output directory. quarto.project.output_directory points to the active
-  -- profile's actual output directory (e.g. docs/de); writing there fixes
-  -- this. For standalone documents without a project (quarto.project is
-  -- then nil), the previous document-relative path remains as a fallback.
-  --
-  -- The `<script src="...">` reference must be relative, not root-absolute
-  -- (`/coi-serviceworker.js`): a root-absolute path resolves against the
-  -- filesystem root for a standalone document opened directly as a local
-  -- `file://`, which 404s every time. But a *plain* relative path (just
-  -- "coi-serviceworker.js") breaks the opposite way in a project with
-  -- chapters in subfolders: the file is written once, at the project output
-  -- root, while a nested chapter's own page resolves that same relative
-  -- reference against ITS OWN directory instead. Quarto's own
-  -- `quarto.project.offset` is exactly the relative path back from the
-  -- current page to the project root (measured: "." at the root, ".." one
-  -- level down, etc. -- always populated, even for a standalone document
-  -- with no project at all, where it is also "."). Prepending it makes the
-  -- reference correct at every nesting depth AND for a standalone document.
-  --
-  -- Measured exception that no path can fix: under `embed-resources: true`
-  -- Quarto inlines this script's whole content into the page, so the tag
-  -- has no `src` left at all. coi-serviceworker.js registers itself via
-  -- `document.currentScript.src`, which is "" for an inline script -- the
-  -- registration then resolves against the page itself and is rejected
-  -- (MIME `text/html`). Whatever this filter writes here is irrelevant in
-  -- that combination, and a service worker cannot be inlined or loaded
-  -- from a `data:` URI either way: browsers require a real, separate
-  -- same-origin script URL. So COI silently does not come up there; the
-  -- extension degrades gracefully without it (Stop still works, as a hard
-  -- worker restart -- see Known limitations).
-  local coiContent = readTemplateFile("coi-serviceworker.js")
-  if coiContent then
-    local coiPath = "coi-serviceworker.js"
-    if quarto.project and quarto.project.output_directory then
-      coiPath = quarto.project.output_directory .. "/coi-serviceworker.js"
-    end
-    local coiOut = io.open(coiPath, "w")
-    if coiOut then
-      coiOut:write(coiContent)
-      coiOut:close()
-    end
-  end
-  local coiOffset = "."
-  if quarto.project and isVariablePopulated(quarto.project.offset) then
-    coiOffset = quarto.project.offset
-  end
-  quarto.doc.include_text("in-header", '<script src="' .. coiOffset .. '/coi-serviceworker.js"></script>')
+  -- The Python worker (ctm-libs: CTMWorker) and coi-serviceworker.js, which
+  -- makes the page cross-origin isolated on hosts without COOP/COEP headers
+  -- (GitHub Pages), for input() and a graceful Stop: ctm-libs writes the file
+  -- once at the output root and loads it relative to the project root, as
+  -- this extension did. Under `embed-resources: true` the script is inlined
+  -- and cannot register itself; Python works without it (Stop restarts the
+  -- worker -- see Known limitations).
+  ctm.runtime.worker()
 
   local initializedConfigurationPyodide = initializationPyodide()
 
@@ -680,55 +712,60 @@ local function ensurePyodideSetup()
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" defer crossorigin="anonymous"></script>
   ]])
 
-  -- Insert CSS styling and external style sheets
-  includeFileInHTMLTag("in-header", "qpyodide-styling.css", "css")
+  -- The UI translations: ctm-libs' catalogue pyodide-interaktiv (classic head
+  -- scripts, before every module); qpyodide-locale.js sets globalThis.QP_L.
+  ctm.locale.use("pyodide-interaktiv")
 
-  -- Insert the Pyodide initialization routine
-  includeTextInHTMLTag("in-header", initializedConfigurationPyodide, "module")
+  -- The page's settings and cells: an inline classic script in the head. It
+  -- runs while the page is parsed, after the dependencies' classic scripts
+  -- (ctm-libs) and before every module below.
+  includeTextInHTMLTag("in-header", initializedConfigurationPyodide, "js")
 
-  -- Insert the local-storage autosave module (identity resolution + load/
-  -- save/clear, no UI of its own -- its "autosave code to this browser"
-  -- checkbox lives inside the settings gear built by qpyodide-storage-settings.js
-  -- below). Must come after qpyodide-document-settings.js just above (needs
-  -- globalThis.qpyodideLocalStorageOptions and globalThis.qpyodideCellDetails)
-  -- and before qpyodide-storage-settings.js (reads globalThis.qpyodideStorage.anyEnabled
-  -- to decide whether to build the gear at all) and qpyodide-cell-classes.js
-  -- (after-body; reads globalThis.qpyodideStorage for load/save/clear).
-  includeFileInHTMLTag("in-header", "qpyodide-storage.js", "module")
-
-  -- Insert the UI translations. Must come directly after the settings module
-  -- (which defines globalThis.qpyodideLang) and before every module that reads
-  -- globalThis.QP_L at load time.
-  includeFileInHTMLTag("in-header", "qpyodide-locales.js", "module")
-
-  -- Insert JS routine to add document status header
-  includeFileInHTMLTag("in-header", "qpyodide-document-status.js", "module")
-
-
-  -- Shared AI feedback adapter and independent local autosave settings.
-  includeFileInHTMLTag("in-header", "qpyodide-feedback.js", "module")
-  includeFileInHTMLTag("in-header", "qpyodide-storage-settings.js", "module")
-
-  -- Insert JS routine to bring Pyodide online
-  includeFileInHTMLTag("in-header", "qpyodide-document-engine-initialization.js", "module")
-
-  -- Insert the interactive-plot module (second Pyodide instance on the main
-  -- thread, loaded on demand when the first plot appears)
-  includeFileInHTMLTag("in-header", "qpyodide-canvas-plots.js", "module")
+  -- This extension's CSS and modules: cacheable files, one HTML dependency
+  -- (D1; inlined only under embed-resources). Modules run after the page is
+  -- parsed, in document order: the head's in this order, then the ones at
+  -- the end of the body.
+  --   qpyodide-locale.js           QP_L, the UI text in the page's language
+  --   qpyodide-storage.js          local-storage autosave (load/save/clear)
+  --   qpyodide-document-status.js  the status line, input() and COI state
+  --   qpyodide-storage-settings.js the autosave settings (needs qpyodideStorage)
+  --   qpyodide-worker-plugin.js    this extension's part of the worker
+  --   qpyodide-document-engine-initialization.js  brings Python online
+  --   qpyodide-canvas-plots.js     interactive plots (a second Pyodide on the
+  --                                main thread, loaded on the first plot)
+  --   qpyodide-cell-classes.js, qpyodide-cell-initialization.js (end of body)
+  local function module(file, afterBody)
+    return {path = quarto.utils.resolve_path(file), attribs = {type = "module"}, afterBody = afterBody or nil}
+  end
+  ctm.deps.html({
+    name = "pyodide-interaktiv",
+    version = extensionVersion(),
+    stylesheets = {quarto.utils.resolve_path("qpyodide-styling.css")},
+    scripts = {
+      module("qpyodide-locale.js"),
+      module("qpyodide-storage.js"),
+      module("qpyodide-document-status.js"),
+      module("qpyodide-storage-settings.js"),
+      module("qpyodide-worker-plugin.js"),
+      module("qpyodide-document-engine-initialization.js"),
+      module("qpyodide-canvas-plots.js"),
+      module("qpyodide-cell-classes.js", true),
+      module("qpyodide-cell-initialization.js", true),
+    }
+  })
+  -- The AI feedback adapter, only when feedback is on.
+  if feedbackEnabled == "true" then
+    ctm.deps.html({name = "pyodide-interaktiv-feedback", version = extensionVersion(), scripts = {module("qpyodide-feedback.js")}})
+  end
 
   -- Insert the Monaco Editor initialization
   quarto.doc.include_file("before-body", "qpyodide-monaco-editor-init.html")
-
-  -- Insert the cell data at the end of the document
-  includeFileInHTMLTag("after-body", "qpyodide-cell-classes.js", "module")
-
-  includeFileInHTMLTag("after-body", "qpyodide-cell-initialization.js", "module")
 
 end
 
 local function qPyodideJSCellInsertionCode(counter)
   local insertionLocation = '<div id="qpyodide-insertion-location-' .. counter ..'"></div>\n'
-  local noscriptWarning = '<noscript>' .. (noscriptMessages[lang] or noscriptMessages.en) .. '</noscript>'
+  local noscriptWarning = '<noscript>' .. ctm.locale.text("pyodide-interaktiv", "noscript", lang) .. '</noscript>'
   return insertionLocation .. noscriptWarning
 end
 
@@ -874,10 +911,10 @@ local function extractCodeBlockOptions(block)
     end
   end
 
-  if feedback then cellOptions.policySelection = feedback.selection(block, cellOptions); cellOptions["feedbackContext"] = feedback.context(block, cellOptions, true) end
+  addFeedbackFields(block, cellOptions)
   if cellOptions.context and cellOptions.context ~= "setup" and cellOptions.context ~= "output" and cellOptions.context ~= "interactive" then cellOptions.context = "" end
   -- Merge cell options with default options
-  cellOptions = mergeCellOptions(cellOptions)
+  cellOptions = withoutAiOnly(mergeCellOptions(cellOptions))
 
   -- Set the codeblock text to exclude the special comments.
   cellCode = table.concat(newCodeLines, '\n')
@@ -1515,9 +1552,18 @@ end
 -- Register one marked cell as an interactive Pyodide cell and hand back a
 -- placeholder for its insertion point -- see reservePendingCell() above.
 local function buildInteractiveCell(cellCode, markerOptions)
-  local cellOptions = mergeCellOptions(markerOptions)
+  local cellOptions = withoutAiOnly(mergeCellOptions(markerOptions))
   cellOptions["code-fold"] = resolveFoldState(cellOptions["code-fold"])
   return reservePendingCell(cellCode, cellOptions)
+end
+
+-- The interactive cells need the page's scripts, which only HTML output
+-- carries (HTML dependencies are HTML-only). Markdown outputs (gfm,
+-- commonmark, ...) take the non-HTML path: their cells are always shown as
+-- highlighted Python source, as `pdf-fallback` shows them, and the first
+-- Pandoc pass warns once.
+local function interactiveFormat()
+  return quarto.doc.is_format("html")
 end
 
 -- Handle a marked `{python}` CodeBlock that reaches the CodeBlock filter
@@ -1537,11 +1583,11 @@ local function enableMarkedPythonCodeCell(el)
     return nil
   end
 
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  if not interactiveFormat() then
     return pandoc.CodeBlock(cellCode, el.attr)
   end
 
-  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el, markerOptions, true) end
+  addFeedbackFields(el, markerOptions)
   return buildInteractiveCell(cellCode, markerOptions)
 end
 
@@ -1584,7 +1630,7 @@ local function enablePyodideCodeCell(el)
 
   -- Map `echo`/`include` onto this extension's own interactive/output/setup
   -- cell kinds (see qpyodide-cell-classes.js) for the interactive HTML/
-  -- markdown path below, the same way real Quarto's `echo`/`include`
+  -- path below, the same way real Quarto's `echo`/`include`
   -- decide what a real, executed cell shows: `include: false` -> "setup"
   -- (runs invisibly at startup, output discarded -- nothing shown at all),
   -- `echo: false` -> "output" (runs automatically at startup, shows only
@@ -1658,7 +1704,7 @@ local function enablePyodideCodeCell(el)
     --
     -- Interactive formats keep their normal handling: there the Pyodide
     -- editor below is the better degraded state, not static source.
-    if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+    if not interactiveFormat() then
       -- Nothing ran, so there is no output left to show once the source
       -- is hidden -- `echo: false` ends up the same as `include: false`.
       if not includeEnabled or not echoEnabled then
@@ -1678,14 +1724,15 @@ local function enablePyodideCodeCell(el)
   -- source as normal, properly highlighted Python instead of the raw,
   -- unstyled `{pyodide-python}` block; the `#|` cell-option comments that
   -- a real Python engine would otherwise have hidden are stripped either
-  -- way. Off by default: the block passes through unchanged.
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  -- way. Off by default: the block passes through unchanged. Markdown
+  -- outputs always show the source (see interactiveFormat()).
+  if not interactiveFormat() then
     local fallback = pdfFallback
     if isVariablePopulated(cellOptions["pdf-fallback"]) then
       fallback = cellOptions["pdf-fallback"]
     end
 
-    if isPdfFallbackEnabled(fallback) then
+    if isPdfFallbackEnabled(fallback) or quarto.doc.is_format("markdown") then
       -- This path never actually executes the cell (no autoexec here), so
       -- there is no separate output to fall back to once the source is
       -- hidden -- `echo: false` therefore has nothing left to show either,
@@ -1749,7 +1796,7 @@ local function handleMarkedCellDiv(el)
   -- Non-interactive formats (PDF, docx, ...): the engine already produced
   -- the real output, crossrefs and all -- only the marker line itself has
   -- to disappear from the displayed source.
-  if not (quarto.doc.is_format("html") or quarto.doc.is_format("markdown")) then
+  if not interactiveFormat() then
     el.content[codeIndex] = pandoc.CodeBlock(cellCode, el.content[codeIndex].attr)
     return el
   end
@@ -1766,7 +1813,7 @@ local function handleMarkedCellDiv(el)
       el:walk({Div=recover, Figure=recover, Image=recover, Span=recover})
     end
   end
-  if feedback then markerOptions.policySelection = feedback.selection(el, markerOptions); markerOptions.feedbackContext = feedback.context(el.content[codeIndex], markerOptions, true) end
+  addFeedbackFields(el, markerOptions, el.content[codeIndex])
   local insertion = buildInteractiveCell(cellCode, markerOptions)
 
   -- Keep Quarto's own figure float (and with it the caption and the
@@ -1812,38 +1859,62 @@ local function stitchDocument(doc)
   return doc
 end
 
--- Shared locator for ai-feedback and JSXGraph (feedback-loader.lua).
 local needFeedback = false
-local dependencies = nil
-local function deps()
-  dependencies = dependencies or dofile(quarto.utils.resolve_path("feedback-loader.lua"))
-  return dependencies
+
+-- What on the page concerns this extension: `{pyodide-python}` cells,
+-- `# pyodide:` marker cells and AI feedback activities.
+local function pageUses(doc)
+  local found, cells = false, false
+  doc.blocks:walk({
+    CodeBlock = function(block)
+      if isPyodideCell(block) or (block.classes:includes("python") and select(2, extractPyodideMarker(block.text)) ~= nil) then found = true; cells = true end
+    end,
+    Div = function(div) if div.classes:includes("ai-feedback") then found = true end end,
+  })
+  return found, cells
 end
 
+local pageMeta = nil
 return {
-  {
-    Meta = setPyodideInitializationOptions
-  },
-  -- Feedback is on unless `pyodide: feedback: false`; the ai-feedback shipped
-  -- with this extension is installed together with it. A page that uses a
-  -- missing optional extension stops with the install command. Decided before
-  -- callouts are marked, so hidden callouts never reach a feedback context.
+  -- The Meta pass only records the page's metadata (N7): the settings are
+  -- read in the first Pandoc pass, and only on pages this extension serves.
+  { Meta = function(meta)
+      pageMeta = meta
+      ctm.settings.load(meta)
+      return meta
+    end },
+  -- Feedback is on unless `pyodide: feedback: false`; AI feedback is part of
+  -- ctm-libs. A page that uses JSXGraph without the extension stops with the
+  -- install command. Decided before callouts are marked, so hidden callouts
+  -- never reach a feedback context. HTML pages without cells, marker cells
+  -- or activities read no settings and load nothing (E14).
   { Pandoc = function(doc)
-      if not quarto.doc.is_format("html") then return doc end
-      deps().requireUsed(doc, "pyodide-interaktiv")
-      needFeedback = feedbackEnabled ~= "false" or deps().uses(doc)["ai-feedback"] == true
+      if not quarto.doc.is_format("html") then
+        setPyodideOptionsFromMeta(pageMeta or doc.meta)
+        if quarto.doc.is_format("markdown") and select(2, pageUses(doc)) then
+          quarto.log.warning("pyodide-interaktiv: Markdown output shows this page's Pyodide cells as Python source; "
+            .. "they run only in HTML output.")
+        end
+        return doc
+      end
+      ctm.deps.requireUsed(doc, "pyodide-interaktiv")
+      local uses, cells = pageUses(doc)
+      if not uses then return doc end
+      pageHasCells = cells
+      setPyodideOptionsFromSettings(pageMeta or doc.meta)
+      needFeedback = feedbackWanted or ctm.deps.uses(doc)["ai-feedback"] == true
       return doc
     end },
   { Callout = function(c)
       if needFeedback and quarto.doc.is_format("html") then
-        feedback = feedback or deps().feedback()
+        feedback = feedback or ctm.feedback
         return feedback.markCallout(c)
       end
       return c
     end },
   { Pandoc = function(doc)
       if needFeedback and quarto.doc.is_format("html") then
-        feedback = feedback or deps().feedback()
+        feedback = feedback or ctm.feedback
         return feedback.prepare(doc)
       end
       return doc
@@ -1875,5 +1946,13 @@ return {
   },
   {
     Pandoc = stitchDocument
-  }
+  },
+  -- The page's build message without AI feedback (P22): inside the CTM
+  -- Assessment package ctm-libs' end filter prints it after every component;
+  -- on its own this extension prints it here, as its last pass.
+  { Pandoc = function(doc)
+      local loaded = rawget(ctm, "feedback")
+      if loaded and not rawget(_G, "__ctmLibsEnd") then loaded.flush() end
+      return doc
+    end }
 }

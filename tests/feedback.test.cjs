@@ -4,15 +4,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
 const ext = path.join(__dirname, '../_extensions/pyodide-interaktiv');
+const libs = process.env.CTM_LIBS_EXTENSION || path.join(__dirname, '../_extensions/ctm-libs');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function page({language='en', storage='session', hints=true, enabled=true, autosave=false} = {}) {
   const dom = new JSDOM('<main></main>', {url:'https://course.invalid/examples.html', runScripts:'outside-only'});
   const w = dom.window;
   w.AbortController = AbortController; w.confirm=()=>true;
-  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(process.env.AI_FEEDBACK_EXTENSION || path.join(__dirname,'../_extensions/ai-feedback'),file),'utf8'));
+  for (const file of ['feedback-core.js','feedback-dom.js','ai-feedback.js']) w.eval(fs.readFileSync(path.join(libs,'feedback',file),'utf8'));
   w.qpyodideLang = language;
-  w.qpyodideFeedbackOptions = {enabled,hints,storage};
-  w.eval(fs.readFileSync(path.join(ext,'qpyodide-locales.js'),'utf8'));
+  w.qpyodideFeedbackOptions = {enabled,hints,storage,uiLanguage:language};
+  // The interface strings: ctm-libs' catalogue (shipped copy or CTM_LIBS_EXTENSION).
+  for (const file of ['ctm-locale.js','common.js','pyodide-interaktiv.js']) w.eval(fs.readFileSync(path.join(libs,'locales',file),'utf8'));
+  w.QP_L = w.CTMLocales.table('pyodide-interaktiv', language);
   if(autosave){w.qpyodideLocalStorageOptions={enabled:true,epoch:''};w.qpyodideCellDetails=[{id:'1',code:'print(80)',options:{label:'one'}}];w.eval(fs.readFileSync(path.join(ext,'qpyodide-storage.js'),'utf8'));}
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-feedback.js'),'utf8'));
   let runs = 0, execute = async () => ({entries:[{type:'stdout',message:'80'}], images:[]});
@@ -87,11 +90,9 @@ test('different editors have independent evidence; readonly/disabled cells have 
   assert.equal(unit('x=1',{'read-only':'true'}).feedbackButton,null);w.close();
   const disabled=page({enabled:false});assert.equal(disabled.unit().feedbackButton,null);disabled.w.close();
 });
-test('older runtime disables Feedback without disabling Run',()=>{
-  const {w,F,unit}=page();F.version='0.2.1';const u=unit();assert.equal(u.feedbackButton.disabled,true);assert.equal(u.runButton.disabled,false);assert.match(u.outputFeedbackDiv.textContent,/0.5.0/);w.close();
-});
-for(const language of ['en','de','sv','no','da','nb'])test('localized tutor policy survives: '+language,async()=>{
-  const {w,unit}=page({language});const u=unit();const text=await prompt(u);assert.ok(text.includes(w.AIFeedback.shippedPolicies.integrations['pyodide-interaktiv']['base-prompt']));assert.match(text,new RegExp('Write explanations in '+(language==='no'?'nb':language))); w.close();
+// The language is resolved at render time (ctm.locale; no -> nb there).
+for(const language of ['en','de','sv','da','nb'])test('localized tutor policy survives: '+language,async()=>{
+  const {w,unit}=page({language});const u=unit();const text=await prompt(u);assert.ok(text.includes(w.AIFeedback.shippedPolicies.integrations['pyodide-interaktiv']['base-prompt']));assert.match(text,new RegExp('Write explanations in '+language)); w.close();
 });
 test('review mode has no hint counter and explicit shared defaults take precedence',async()=>{
   const {w,F,unit}=page({hints:false});w.__aiFeedbackConfig={storage:'local'};const u=unit();await prompt(u);assert.equal(u.outputFeedbackDiv.querySelector('.ai-feedback-hint'),null);assert.equal(F.loadConfig().storage,'local');w.close();
