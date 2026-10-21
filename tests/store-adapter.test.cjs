@@ -158,3 +158,16 @@ test("refused replacement keeps only acknowledged code and starter deletes it", 
   f.handles[0].flush = flush; u.editor.setValue("starter");
   expect(f.api.save("1") === true && !f.api.hasSaved("1"), "starter deletion retained acknowledgement");
 });
+
+test("autosave invalidates an earlier acknowledgement before a later manual edit", () => {
+  const f = fixture(source), u = f.unit(); f.api.attach(u);
+  u.editor.setValue("answer A"); f.api.save("1");
+  expect(f.api.load("1") === "answer A", "manual write not acknowledged");
+  u.editor.setValue("answer B"); f.handles[0].flush();
+  f.api.setManualMode(true); u.editor.setValue("answer A");
+  expect(f.records.get("cell").inputs.code === "answer B", "test did not persist replacement");
+  expect(f.api.load("1") === null, "old acknowledgement reused after autosave replacement");
+  f.api.save("1"); f.api.setManualMode(false); u.editor.setValue("starter"); f.handles[0].flush();
+  f.api.setManualMode(true); u.editor.setValue("answer A");
+  expect(!f.records.has("cell") && !f.api.hasSaved("1"), "deleted acknowledgement reused");
+});

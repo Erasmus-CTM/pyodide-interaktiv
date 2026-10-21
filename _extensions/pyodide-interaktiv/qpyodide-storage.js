@@ -162,6 +162,9 @@ globalThis.qpyodideStorage = (() => {
     changed(uid) {
       const entry = entries.get(String(uid));
       if (!entry || manual() || !store()?.enabled() || entry.description.save === false) return;
+      // Without an autosave acknowledgement, a later flush may replace or
+      // delete this value. Never keep an acknowledgement across that edit.
+      entry.saved = null;
       entry.handle?.changed();
     },
     save(uid) {
