@@ -138,3 +138,23 @@ expect(second.getCode() === "second answer", "second unlabelled answer shifted")
 expect(f.values.get("qpyodide:code:/lesson.html:label:named") === "named answer", "labelled key was deleted by another cell");
 expect(!f.values.has("qpyodide:code:/lesson.html:hash:yjccrj") && !f.values.has("qpyodide:code:/lesson.html:hash:yjccrj:2"), "migrated hash keys retained");
 });
+
+test("queued, canceled and refused writes never acknowledge edited code", () => {
+  const f = fixture(source), u = f.unit(); f.api.attach(u);
+  u.editor.setValue("queued edit");
+  expect(f.api.load("1") === null && !f.api.hasSaved("1"), "queued edit marked saved");
+  f.api.setManualMode(true);
+  expect(f.api.load("1") === null && f.records.size === 0, "canceled edit marked saved");
+  f.handles[0].flush = () => false;
+  expect(f.api.save("1") === false && f.api.load("1") === null, "refused save marked saved");
+});
+test("refused replacement keeps only acknowledged code and starter deletes it", () => {
+  const f = fixture(source, {manual: true}), u = f.unit(); f.api.attach(u);
+  u.editor.setValue("durable answer");
+  expect(f.api.save("1") === true && f.api.load("1") === "durable answer", "successful write not acknowledged");
+  const flush = f.handles[0].flush.bind(f.handles[0]);
+  f.handles[0].flush = () => false; u.editor.setValue("refused replacement");
+  expect(f.api.save("1") === false && f.api.load("1") === "durable answer", "refused write replaced acknowledged code");
+  f.handles[0].flush = flush; u.editor.setValue("starter");
+  expect(f.api.save("1") === true && !f.api.hasSaved("1"), "starter deletion retained acknowledgement");
+});

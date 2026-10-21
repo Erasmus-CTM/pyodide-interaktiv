@@ -162,14 +162,17 @@ globalThis.qpyodideStorage = (() => {
     changed(uid) {
       const entry = entries.get(String(uid));
       if (!entry || manual() || !store()?.enabled() || entry.description.save === false) return;
-      entry.saved = entry.unit?.getCode() ?? null;
       entry.handle?.changed();
     },
     save(uid) {
       const entry = entries.get(String(uid));
       if (!entry || !store()?.enabled() || entry.description.save === false) return false;
-      entry.saved = entry.unit?.getCode() ?? null;
-      if (entry.handle?.flush) return entry.handle.flush();
+      if (entry.handle?.flush) {
+        const code = entry.unit?.getCode() ?? null;
+        const saved = entry.handle.flush();
+        if (saved) entry.saved = code === entry.description.original ? null : code;
+        return saved;
+      }
       entry.handle?.changed(); return false;
     },
     load(uid) { return entries.get(String(uid))?.saved ?? null; },

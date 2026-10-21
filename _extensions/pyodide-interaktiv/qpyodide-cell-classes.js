@@ -539,7 +539,8 @@ class EditorUnit {
     const stored = globalThis.qpyodideStorage.load(this.uid);
     const live = this.editor ? this.editor.getValue() : stored;
     const original = this.code;
-    const meaningfullySaved = stored !== null && stored !== original && live !== original;
+    const hasStoredCode = stored !== null && stored !== original;
+    const meaningfullySaved = hasStoredCode && live === stored;
     const savableNow = !meaningfullySaved && globalThis.qpyodideStorage.cellEnabled(this.options);
     const visible = meaningfullySaved || savableNow;
     this.storageStatusLabel.hidden = !visible;
@@ -549,7 +550,7 @@ class EditorUnit {
     this.storageStatusLabel.textContent = meaningfullySaved
       ? (justRestored ? QP_L.storageRestoredStatus : QP_L.storageSavedStatus)
       : (savableNow ? QP_L.storageSavableStatus : "");
-    if (this.clearSavedButton) this.clearSavedButton.hidden = !meaningfullySaved;
+    if (this.clearSavedButton) this.clearSavedButton.hidden = !hasStoredCode;
     // Tracks whether the label is currently showing "Restored" specifically
     // -- onFirstEditAfterRestore() below watches this to flip it to
     // "Saved" the moment the restored text gets overwritten, since
@@ -561,10 +562,9 @@ class EditorUnit {
   /** Called on every editor content change. The "Restored" status only
    *  ever describes the code exactly as it was loaded from storage; once
    *  the student changes so much as one character, it stops being
-   *  accurate and must switch to the generic "Saved" wording right away --
-   *  independent of whether an actual write has happened yet (autosave is
-   *  debounced, and manual-save mode may not write until much later). The
-   *  underlying saved copy is untouched either way; only the label. */
+   *  accurate. Show the saving-enabled marker until the live text matches
+   *  an acknowledged stored value; a queued autosave is not an acknowledgement.
+   *  The underlying saved copy is untouched. */
   onFirstEditAfterRestore() {
     if (!this.showingRestored) return;
     this.updateStorageStatus(false);
