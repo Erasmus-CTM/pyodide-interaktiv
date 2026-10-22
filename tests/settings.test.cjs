@@ -55,6 +55,7 @@ test('F-79: a page\'s pyodide: map no longer drops the project\'s keys', { skip 
   assert.deepEqual([...s.qpyodideInstallPythonPackagesList], ['sympy', 'networkx']);
   assert.equal(s.qpyodideCustomizedPyodideOptions.env.HOME, '/home/learner');
   assert.equal(s.qpyodideLang, 'de');
+  assert.equal(s.qpyodidePreloadPackages, true, 'existing courses keep automatic preloads');
 }));
 
 test('1 and 0 keep their meaning, as YAML numbers and as strings; empty values are unset', { skip }, () => withProject({
@@ -160,4 +161,16 @@ test('languages: pyodide: lang, ctm-assessment: lang, then lang; no and nn give 
   assert.deepEqual(langs, { own: 'sv', shared: 'de', no: 'nb', nn: 'nb', other: 'en' });
   assert.equal(settings(dir, 'no.qmd').qpyodideFeedbackOptions.uiLanguage, 'nb');
   assert.match(fs.readFileSync(path.join(dir, 'nn.html'), 'utf8'), /<noscript>Slå på JavaScript for å kunne bruke de interaktive kodecellene på denne siden\.<\/noscript>/);
+}));
+
+test('preload-packages: false survives real shared settings; a page may opt back in', { skip }, () => withProject({
+  '_quarto.yml': yml(['plain.qmd', 'plots.qmd'], 'pyodide:\n  preload-packages: false\n  packages: [networkx]\n'),
+  'plain.qmd': '---\ntitle: Plain IDE\npyodide:\n  feedback: false\n---\n' + CELL,
+  'plots.qmd': '---\ntitle: Plot course\npyodide:\n  preload-packages: true\n---\n' + CELL,
+}, dir => {
+  const r = render(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(settings(dir, 'plain.qmd').qpyodidePreloadPackages, false);
+  assert.equal(settings(dir, 'plots.qmd').qpyodidePreloadPackages, true);
+  assert.deepEqual([...settings(dir, 'plain.qmd').qpyodideInstallPythonPackagesList], ['networkx']);
 }));

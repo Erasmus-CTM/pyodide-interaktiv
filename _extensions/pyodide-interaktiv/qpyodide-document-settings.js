@@ -13,6 +13,10 @@ globalThis.qpyodideInstallPythonPackagesList = [{{INSTALLPYTHONPACKAGESLIST}}];
 // Check to see if we have an empty array, if we do set to skip the installation.
 globalThis.qpyodideSetupPythonPackages = !(qpyodideInstallPythonPackagesList.indexOf("") !== -1);
 
+// Automatically preload the HTTP shim and plotting packages? Defaults to true.
+// Explicit pyodide: packages entries still install when this is false.
+globalThis.qpyodidePreloadPackages = {{PRELOADPACKAGES}};
+
 // Display a startup message?
 globalThis.qpyodideShowStartupMessage = {{SHOWSTARTUPMESSAGE}};
 

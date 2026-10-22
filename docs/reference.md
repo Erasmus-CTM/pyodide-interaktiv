@@ -71,6 +71,7 @@ Can be disabled via `feedback-hints: false`.
 ```yaml
 pyodide:
   packages: [numpy, pandas]      # packages to install via micropip on startup
+  preload-packages: true        # false: load optional packages only when imported
   base-url: https://cdn.jsdelivr.net/pyodide/v0.28.3/   # optional; WebAgg plots need Pyodide 0.28+
   build-variant: full
   show-startup-message: true
@@ -93,7 +94,7 @@ the `_metadata.yml` files and the page's front matter each contribute their
 keys, the nearest winning, so a page that sets `pyodide: lang: de` keeps the
 project's `feedback: false` (before 1.9 a page's own `pyodide:` map replaced
 the project's). The on/off options (`show-startup-message`, `feedback`,
-`feedback-hints`, `local-storage`, `html-autoexec`) take `true`, `false`,
+`feedback-hints`, `local-storage`, `html-autoexec`, `preload-packages`) take `true`, `false`,
 `1` or `0`; any other value warns once and uses the default (before, a
 value such as `feedback: yes` broke the page's script). A key that looks
 like a credential (`api-key`, `token`, `secret`, …) stops the render:
@@ -409,6 +410,14 @@ ctm-libs' catalogue `pyodide-interaktiv`; the Python worker, its RPC and
 `coi-serviceworker.js` are ctm-libs' (`runtime/pyodide-worker.js`,
 `CTMWorker`), shared with the other CTM components.
 
+**Plain Python IDE.** Set `pyodide: preload-packages: false` to skip the
+automatic pyodide_http, micropip and matplotlib preload and HTTP patch.
+Explicit `pyodide: packages` entries still install. Each run still resolves
+imports, so importing matplotlib later loads it and enables plot output on
+that run. Plain Python does not initialize plotting. The default is `true`,
+which retains course startup behavior. This option changes package loading,
+not the editor or the readiness/restart sequence.
+
 **Start-up in two stages.** First the interpreter (and `pyodide: packages`,
 which a check may import): `qpyodideReady` resolves, and other components'
 checks on the page can run. Then pyodide_http, micropip and matplotlib load
@@ -416,7 +425,7 @@ in the background without getting in a check's way: they download in small
 pieces that pause while a check downloads, and install while nothing else
 runs. This extension's cells wait for both: the status line says "Ready"
 and Run is enabled only then, as before. The plot setup (importing
-`pyplot`) runs with the first cell run, startup cells included. If the
+`pyplot`) runs with the first cell run after matplotlib is loaded, startup cells included. If the
 extra packages cannot be loaded, the status line says that plots are not
 available and offers **Retry**; other cells run anyway (a cell that imports
 matplotlib shows the error). After a restart, Run waits for the new start,
