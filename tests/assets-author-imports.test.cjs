@@ -5,7 +5,9 @@ const quarto=process.env.QUARTO_BIN||'quarto',repo=path.join(__dirname,'..');
 const skip=spawnSync(quarto,['--version']).error?'Quarto required':false;
 function project(mode, options = {}) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qpy-assets-')),libs=process.env.CTM_LIBS_EXTENSION||path.join(repo,'_extensions/ctm-libs');
-  for(const name of ['pyodide-interaktiv','ai-feedback'])fs.cpSync(path.join(repo,'_extensions',name),path.join(dir,'_extensions',name),{recursive:true});
+  for(const name of ['pyodide-interaktiv','ai-feedback'])fs.cpSync(
+    name === 'pyodide-interaktiv' && options.baseline ? process.env.CTM_PRE_ASSETS_EXTENSION : path.join(repo,'_extensions',name),
+    path.join(dir,'_extensions',name),{recursive:true});
   fs.cpSync(libs,path.join(dir,'_extensions/ctm-libs'),{recursive:true});
   const table=JSON.parse(fs.readFileSync(path.join(libs,'assets.json'),'utf8'));
   const runtime=fs.readFileSync(path.join(libs,'runtime/pyodide-runtime.js'),'utf8');
@@ -155,16 +157,32 @@ test('eval false ordinary fragments are excluded while executable marked cells r
     assert.deepEqual(Array.from(renderedSettings(p).qpyodideCellDetails, c => c.options.label), ['disabled-marked', 'active']);
   });
 });
-for (const level of ['projectEval', 'documentEval']) test(level + ' false excludes fragments but cell true overrides', {skip}, () => {
+for (const level of ['projectEval', 'documentEval']) test(level + ' false preserves existing interactive cells and their imports', {skip}, () => {
   const body = ordinary('disabled') + marked('disabled-marked') + ordinary('active', '#| eval: true\n');
+  const labels = ['disabled', 'disabled-marked', 'active'];
+  // execute.eval metadata does not make these ordinary cells inert through
+  // the existing Quarto-param resolver. Only exclude what it actually disables.
   withProject('local', {[level]: false, body}, (p, r, output) => {
     assert.equal(r.status, 0, output);
+    const cells = Array.from(renderedSettings(p).qpyodideCellDetails);
+    assert.deepEqual(cells.map(c => c.options.label), labels);
     const fragments = JSON.parse(fs.readFileSync(path.join(p.dir, 'fragments.json'), 'utf8'));
-    assert.deepEqual(fragments.map(x => x.origin), ['pyodide-interaktiv:disabled-marked:cell', 'pyodide-interaktiv:active:cell']);
-    assert.equal(fragments[0].source, 'import networkx');
-    assert.equal(fragments[1].source, 'import numpy');
-    assert.deepEqual(Array.from(renderedSettings(p).qpyodideCellDetails, c => c.options.label), ['disabled-marked', 'active']);
+    assert.equal(fragments.length, cells.length);
+    for (const cell of cells) {
+      const fragment = fragments.find(f => f.origin === 'pyodide-interaktiv:' + cell.options.label + ':cell');
+      assert.ok(fragment, 'every interactive cell is collected');
+      assert.equal(fragment.source, cell.code);
+    }
   });
+  // Dedicated CI supplies the reviewed pre-assets extension for an actual
+  // old/current Quarto control; neither resolver is replaced by a test stub.
+  if (process.env.CTM_PRE_ASSETS_EXTENSION) {
+    for (const baseline of [true, false]) withProject('cdn', {[level]: false, body, baseline}, (p, r, output) => {
+      assert.equal(r.status, 0, output);
+      assert.deepEqual(Array.from(renderedSettings(p).qpyodideCellDetails, c => c.options.label), labels,
+        baseline ? 'pre-assets behavior' : 'current behavior');
+    });
+  }
 });
 test('non HTML source fallback preserves legacy rendering', {skip}, () => {
   withProject('cdn', {body: ordinary('active')}, (p, r, output) => {
