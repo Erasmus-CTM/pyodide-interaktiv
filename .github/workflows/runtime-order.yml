@@ -1,0 +1,15 @@
+name: Preserve runtime dependency order
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  actual-course:
+    uses: Erasmus-CTM/ctm-assessment/.github/workflows/compare-courses.yml@031bbb1fb70bb1cc48b77982468d49b8208e5f90
+    with:
+      tooling-ref: 031bbb1fb70bb1cc48b77982468d49b8208e5f90
+      course: aacchhee/ingmat3a_ntnu
+      course-ref: e45851080f462e84cde281528f21d4f21292a6ba
+      base: 294d5b86d06af5fecb5fcf50dc4562b17ee5c273
+      head: 65be5facbf67f900533a71cd950aa82e5c4c1e95
+      review-refs: pyodide-interaktiv=${{ github.event.pull_request.head.sha }}
