@@ -50,6 +50,15 @@ function project(mode, options = {}) {
     assert.ok(source.includes('function M.indexURL()'), 'actual runtime entry');
     fs.writeFileSync(file, source.replace('function M.indexURL()', 'function M.indexURL()\nassert(_G.__qpySettingsLoaded, "INDEX URL BEFORE SETTINGS")'));
   }
+  if (options.baseline) {
+    // The old runtime selects its URL at module load, so its reviewed shipped
+    // library and forwarder are part of the compatibility control as well.
+    for (const name of ['ctm-libs', 'ai-feedback']) {
+      const target = path.join(dir, '_extensions', name);
+      fs.rmSync(target, {recursive: true, force: true});
+      fs.cpSync(path.join(process.env.CTM_PRE_ASSETS_EXTENSION, '..', name), target, {recursive: true});
+    }
+  }
   return {dir,table,libs,version};
 }
 for(const mode of ['cdn','local'])test('nested '+mode+' pages resolve Monaco/SVG icons and collect actual authored cells',{skip},()=>{
