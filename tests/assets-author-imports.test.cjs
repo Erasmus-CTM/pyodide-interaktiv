@@ -30,7 +30,7 @@ function project(mode, options = {}) {
     cell('setup','setup','import numpy as np')+'\n'+cell('output','output','print("import pretend_package")')+'\n'+
     cell('ordinary','interactive','from math import sqrt\n# import comment_package')+'\n'+
     fence+'{python}\n# pyodide: true, label=marked\nimport networkx as nx\n'+fence+'\n';
-  if (options.body !== undefined) files['sub/page.qmd'] = '---\ntitle: assets\nengine: markdown\n---\n\n' + options.body;
+  if (options.body !== undefined) files['sub/page.qmd'] = '---\ntitle: assets\n---\n\n' + options.body;
   if (options.documentEval !== undefined) files['sub/page.qmd'] = files['sub/page.qmd'].replace('title: assets\n', 'title: assets\nexecute:\n  eval: ' + options.documentEval + '\n');
   for(const [name,source]of Object.entries(files)){const target=path.join(dir,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,source);}
   const library = path.join(dir, '_extensions/ctm-libs');
