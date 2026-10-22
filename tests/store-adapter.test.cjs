@@ -7,7 +7,7 @@ function fixture(source, {epoch = "", enabled = true, manual = false, cells = nu
   const storage = {getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) { values.set(key, String(value)); }, removeItem(key) { values.delete(key); }};
   if (manual) storage.setItem("qpyodide:local-storage-manual-mode", "1");
-  function element() { return {children: [], append(...items) { this.children.push(...items); }, remove() {},
+  function element() { return {children: [], append(...items) { this.children.push(...items); }, remove() { this.removed = true; },
     querySelectorAll() { return []; }, textContent: "", className: ""}; }
   const doc = {addEventListener(name, fn) { listeners[name] = fn; }, createElement: element, getElementById: element};
   const root = {qpyodideLang: "en", qpyodideLocalStorageOptions: {epoch},
@@ -47,7 +47,8 @@ function fixture(source, {epoch = "", enabled = true, manual = false, cells = nu
     let code = original;
     const u = {uid, code: original, options: {label: uid, "ctm-store-save": true},
       hostDiv: element(), outputGraphDiv: element(), lastRunCode: null, lastOutput: null,
-      getCode: () => code, invalidateFeedback() {}, updateInputGate() {}, updateStorageStatus() {},
+      getCode: () => code, invalidateFeedback() {}, updateInputGate() {}, statusUpdates: [],
+      updateStorageStatus(restored) { this.statusUpdates.push({restored, saved: api.load(uid)}); },
       resetEditorToOriginal() { this.suppressStorageChanges = true; this.editor.setValue(original); this.suppressStorageChanges = false; },
       editor: {setValue(value) { code = value; if (!u.suppressStorageChanges) api.changed(uid); }}};
     return u;
@@ -170,4 +171,86 @@ test("autosave invalidates an earlier acknowledgement before a later manual edit
   f.api.save("1"); f.api.setManualMode(false); u.editor.setValue("starter"); f.handles[0].flush();
   f.api.setManualMode(true); u.editor.setValue("answer A");
   expect(!f.records.has("cell") && !f.api.hasSaved("1"), "deleted acknowledgement reused");
+});
+
+test("reset before delayed extra attachment removes both stale offers and restored code", () => {
+  for (const sourceHash of ["different", "fedcba9876543210"]) {
+    const f = fixture(source);
+    f.api.registerIdentity("1.2", "extra:label:cell");
+    f.records.set("extra:cell", {source: sourceHash, inputs: {code: "deleted extra answer"}});
+    let mounts = 0;
+    f.api.prepareExtra("1.2", () => { mounts++; });
+    expect(mounts === 1, "test did not defer a requested mount");
+    f.handles[0].clear();
+    const extra = f.unit("1.2", ""); f.api.attach(extra);
+    expect(extra.getCode() === "", "deleted pending code restored on late attach");
+    expect(extra.hostDiv.children.length === 0, "deleted answer offered on late attach");
+    expect(!f.api.hasSaved("1.2"), "deleted acknowledgement returned on late attach");
+    expect(extra.statusUpdates.every(update => !update.restored), "late attach retained restored status");
+    expect(!f.records.has("extra:cell"), "clear reimported deleted answer");
+  }
+});
+
+test("scoped persistence loss forgets acknowledgement without resetting live code or output", () => {
+  const f = fixture(source, {manual: true, cells: [
+    {id: 1, code: "starter", options: {"ctm-store-id": "first", "ctm-store-source": "0123456789abcdef"}},
+    {id: 2, code: "starter", options: {"ctm-store-id": "second", "ctm-store-source": "fedcba9876543210"}}
+  ]}), first = f.unit("1"), second = f.unit("2");
+  f.api.attach(first); f.api.attach(second);
+  first.editor.setValue("first answer"); second.editor.setValue("second answer");
+  f.api.save("1"); f.api.save("2");
+  first.lastOutput = "keep visible result"; first.lastRunCode = first.getCode();
+  const before = f.handles[0].changes;
+  // Core owns course/page/component/runtime matching. Invoke only its selected
+  // entry callback, as for raw deletion or an optout without an explicit reset.
+  f.records.delete("first"); f.handles[0].options.forget();
+  expect(!f.api.hasSaved("1"), "deleted record still acknowledged");
+  expect(first.getCode() === "first answer" && first.lastOutput === "keep visible result", "persistence loss reset live work");
+  expect(first.statusUpdates.at(-1).saved === null, "Saved status not refreshed");
+  expect(f.api.load("2") === "second answer" && f.records.get("second").inputs.code === "second answer", "sibling acknowledgement or data touched");
+  expect(f.handles[0].changes === before, "forget scheduled a save");
+  f.api.setUserDisabled(true); f.records.delete("second"); f.handles[1].options.forget();
+  expect(!f.api.hasSaved("2") && second.getCode() === "second answer", "device off retained acknowledgement or reset input");
+});
+
+test("persistence loss removes an outdated offer before and after mounting", () => {
+  const f = fixture(source), primary = f.unit();
+  f.records.set("cell", {source: "different", inputs: {code: "old primary answer"}});
+  f.api.attach(primary); const offer = primary.hostDiv.children[0];
+  f.records.delete("cell"); f.handles[0].options.forget();
+  expect(offer.removed && primary.getCode() === "starter", "mounted offer retained or editor changed");
+  f.api.attach(primary);
+  expect(primary.hostDiv.children.length === 1 && offer.removed, "attach recreated deleted offer");
+
+  f.api.registerIdentity("1.2", "extra:label:cell");
+  f.records.set("extra:cell", {source: "different", inputs: {code: "old extra answer"}});
+  f.api.prepareExtra("1.2", () => {});
+  f.records.delete("extra:cell"); f.handles[1].options.forget();
+  const extra = f.unit("1.2", ""); f.api.attach(extra);
+  expect(extra.hostDiv.children.length === 0 && !f.api.hasSaved("1.2"), "delayed extra recreated deleted offer");
+});
+
+test("a matched external overwrite invalidates the old acknowledgement without restoring remote code", () => {
+  const f = fixture(source, {manual: true}), u = f.unit(); f.api.attach(u);
+  u.editor.setValue("local answer A"); f.api.save("1");
+  f.records.set("cell", {source: "0123456789abcdef", inputs: {code: "remote answer B"}});
+  // Storage-event matching and comparison happen in CTMStore, not this adapter.
+  f.handles[0].options.forget();
+  expect(f.api.load("1") === null, "remote overwrite left stale local acknowledgement");
+  expect(u.getCode() === "local answer A", "remote overwrite replaced live editor");
+  expect(f.records.get("cell").inputs.code === "remote answer B", "forget rewrote remote record");
+  expect(f.handles[0].changes === 0, "manual external overwrite scheduled a save");
+});
+
+test("device off before a delayed exact restore attaches preserves an empty extra editor", () => {
+  const f = fixture(source);
+  f.api.registerIdentity("1.2", "extra:label:cell");
+  f.records.set("extra:cell", {source: "fedcba9876543210", inputs: {code: "now deleted"}});
+  f.api.prepareExtra("1.2", () => {});
+  f.api.setUserDisabled(true); f.records.delete("extra:cell");
+  f.handles[0].options.forget();
+  const extra = f.unit("1.2", ""); f.api.attach(extra);
+  expect(extra.getCode() === "" && !f.api.hasSaved("1.2"), "disabled late attach resurrected saved code");
+  expect(extra.statusUpdates.every(update => !update.restored && update.saved === null), "disabled late attach claimed Restored");
+  expect(extra.hostDiv.children.length === 0, "disabled late attach offered deleted code");
 });

@@ -64,6 +64,13 @@ globalThis.qpyodideStorage = (() => {
     code.textContent = entry.restored.record?.inputs?.code || "";
     panel.append(summary, code); entry.unit.hostDiv.append(panel); entry.offer = panel;
   }
+  // Core calls this only after matching the affected registered entry.
+  // Losing persistence is not an instruction to erase the live editor/output.
+  function forget(entry) {
+    entry.saved = null; entry.pending = null; entry.restored = null;
+    entry.offer?.remove(); entry.offer = null;
+    entry.unit?.updateStorageStatus(false);
+  }
   function makeEntry(uid, description, unit = null, mount = null) {
     let entry = entries.get(uid);
     if (entry) { if (unit) entry.unit = unit; if (mount) entry.mount = mount; return entry; }
@@ -79,9 +86,9 @@ globalThis.qpyodideStorage = (() => {
         return code == null || code === description.original ? null : {code};
       },
       write(inputs) { if (typeof inputs?.code === "string") writeCode(entry, inputs.code); },
+      forget() { forget(entry); },
       clear() {
-        entry.saved = null; entry.pending = null;
-        entry.offer?.remove(); entry.offer = null;
+        forget(entry);
         if (entry.unit && !entry.keepCode) {
           entry.unit.feedbackHandle?.reset();
           entry.unit.invalidateFeedback();
