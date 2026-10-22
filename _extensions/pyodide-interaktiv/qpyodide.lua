@@ -5,6 +5,17 @@
 local ctm = dofile(quarto.utils.resolve_path("ctm-bootstrap.lua"))("pyodide-interaktiv",
   {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 3})
 local feedback = nil
+local INSTALL = "quarto add https://erasmus-ctm.github.io/ctm-assessment/ctm-assessment.tar.gz"
+local STANDALONE = "quarto add Erasmus-CTM/pyodide-interaktiv"
+local function requireAssets()
+  local assets = ctm.assets
+  if type(assets) ~= "table" or type(assets.use) ~= "function"
+      or type(assets.mode) ~= "function" or type(assets.url) ~= "function" then
+    ctm.fail("pyodide-interaktiv needs the shared assets API. Update CTM Assessment: " .. INSTALL
+      .. "; or reinstall the standalone extension: " .. STANDALONE)
+  end
+end
+
 ----
 --- qpyodide.lua – Pandoc Lua filter of the `pyodide-interaktiv` extension
 ---
@@ -56,9 +67,15 @@ local hasDonePyodideSetup = false
 -- cells run on the same version), e.g.
 -- https://cdn.jsdelivr.net/pyodide/v0.28.3/full/; `pyodide: base-url:` and
 -- `build-variant:` still pin a project's own (e.g. .../v0.28.3/debug/).
-local indexURL = ctm.runtime.indexURL()
+local indexURL
 local buildVariant = "full/"
-local baseUrl = indexURL:sub(-#buildVariant) == buildVariant and indexURL:sub(1, -#buildVariant - 1) or indexURL
+local baseUrl
+
+-- Asset URLs depend on this page's loaded settings, never on module loading.
+local function initializeIndexURL()
+  indexURL = ctm.runtime.indexURL()
+  baseUrl = indexURL:sub(-#buildVariant) == buildVariant and indexURL:sub(1, -#buildVariant - 1) or indexURL
+end
 
 -- Backend for interactive Matplotlib plots (qpyodide-canvas-plots.js).
 -- WebAgg needs the browser patch that Pyodide ships from 0.28 on; without it
@@ -904,11 +921,13 @@ end
 local function collectAuthorCell(code, options)
   if not quarto.doc.is_format("html") then return end
   local imports = rawget(_G, "__ctmAuthorImports")
-  if imports and type(imports.add) == "function" then
+  if type(imports) == "table" and type(imports.add) == "function" then
     imports.add({
       source = code, packages = ctm.settings.list("pyodide", "packages"),
       origin = "pyodide-interaktiv:" .. tostring(options["label"] or "") .. ":cell"
     })
+  elseif ctm.assets.mode() == "local" then
+    ctm.fail("pyodide-interaktiv: local asset builds require the CTM Assessment author-import collector. Update CTM Assessment: " .. INSTALL)
   end
 end
 
@@ -1669,7 +1688,6 @@ local function enablePyodideCodeCell(el)
   end
 
   local cellCode, cellOptions = extractCodeBlockOptions(el)
-  collectAuthorCell(cellCode, cellOptions)
 
   -- `eval: false` (cell-level `#|` override, cascading through Quarto's own
   -- document/project default the same way `code-fold` does): a real
@@ -1687,6 +1705,8 @@ local function enablePyodideCodeCell(el)
   if not resolveEvalEnabled(cellOptions["eval"]) then
     return pandoc.CodeBlock(cellCode, pandoc.Attr(el.attr.identifier, {"python"}, {}))
   end
+
+  collectAuthorCell(cellCode, cellOptions)
 
   local echoEnabled = resolveEchoEnabled(cellOptions["echo"])
   local includeEnabled = resolveIncludeEnabled(cellOptions["include"])
@@ -1939,6 +1959,11 @@ end
 
 local pageMeta = nil
 return {
+  -- Diagnose a stale shared library before Meta/settings can obscure the cause.
+  { Pandoc = function(doc)
+      if quarto.doc.is_format("html") and pageUses(doc) then requireAssets() end
+      return doc
+    end },
   -- The Meta pass only records the page's metadata (N7): the settings are
   -- read in the first Pandoc pass, and only on pages this extension serves.
   { Meta = function(meta)
@@ -1953,6 +1978,7 @@ return {
   -- or activities read no settings and load nothing (E14).
   { Pandoc = function(doc)
       if not quarto.doc.is_format("html") then
+        initializeIndexURL()
         setPyodideOptionsFromMeta(pageMeta or doc.meta)
         if quarto.doc.is_format("markdown") and select(2, pageUses(doc)) then
           quarto.log.warning("pyodide-interaktiv: Markdown output shows this page's Pyodide cells as Python source; "
@@ -1964,6 +1990,7 @@ return {
       local uses, cells = pageUses(doc)
       if not uses then return doc end
       pageHasCells = cells
+      initializeIndexURL()
       setPyodideOptionsFromSettings(pageMeta or doc.meta)
       needFeedback = feedbackWanted or ctm.deps.uses(doc)["ai-feedback"] == true
       return doc
