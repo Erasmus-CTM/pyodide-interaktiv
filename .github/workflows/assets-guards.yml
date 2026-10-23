@@ -11,7 +11,7 @@ permissions:
 
 env:
   # Source-reviewed combined store/assets input; final integration gates remain separate.
-  ASSETS_LIB_REF: 41b2be0a94a5bbf9dd8389fa83458d23692f2b4a
+  ASSETS_LIB_REF: 3277d66b7c1c108f6b073a75b38d669d17b73283
 
 jobs:
   guards:
@@ -50,6 +50,10 @@ jobs:
           echo "CTM_PRE_ASSETS_EXTENSION=$GITHUB_WORKSPACE/_pre-assets-source/_extensions/pyodide-interaktiv" >> "$GITHUB_ENV"
       - run: python -m pip install jupyter nbformat
       - run: npm ci --ignore-scripts
+      - name: Initialize the shared Quarto script cache before parallel renders
+        run: |
+          printf 'console.log("CTM Quarto script runtime ready");\n' > "$RUNNER_TEMP/ctm-quarto-cache.ts"
+          quarto run "$RUNNER_TEMP/ctm-quarto-cache.ts"
       - name: Real Quarto guards, parsed fragments and existing runtime cases
         run: |
           set -o pipefail

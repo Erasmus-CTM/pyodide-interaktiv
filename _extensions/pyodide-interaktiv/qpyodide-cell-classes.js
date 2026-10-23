@@ -638,7 +638,7 @@ class EditorUnit {
         value: thiz.savedCode != null ? thiz.savedCode : thiz.code,
         language: "python",
         theme: qpyodideMonacoTheme(),
-        automaticLayout: true,           // Works wonderfully with RevealJS
+        automaticLayout: false,
         scrollBeyondLastLine: false,
         minimap: { enabled: false },
         fontSize: "17.5pt",              // Bootstrap is 1 rem
@@ -658,13 +658,6 @@ class EditorUnit {
       // See details in: https://github.com/coatless/quarto-Pyodide/issues/94
       const model = thiz.editor.getModel();
       model.setEOL(monaco.editor.EndOfLineSequence.LF);
-
-      // Dynamically adjust editor height to fit the content
-      const updateHeight = () => {
-        const contentHeight = thiz.editor.getContentHeight();
-        thiz.editorDiv.style.height = `${contentHeight}px`;
-        thiz.editor.layout();
-      };
 
       const isEmptyCodeText = (selected) =>
         (selected === null || selected === undefined || selected === "");
@@ -711,14 +704,13 @@ class EditorUnit {
       };
 
       thiz.editor.onDidFocusEditorText(addPyodideKeyboardShortCutCommands);
-      thiz.editor.onDidContentSizeChange(updateHeight);
       // Code changes can add/remove input() -> re-evaluate the gate
       thiz.editor.onDidChangeModelContent(() => { thiz.invalidateFeedback({preserveRunOutput: true}); thiz.updateInputGate(); });
       // Autosave to localStorage (debounced), only for opted-in cells
       thiz.editor.onDidChangeModelContent(() => thiz.scheduleSave());
       // "Restored" must stop describing the content the instant it's edited
       thiz.editor.onDidChangeModelContent(() => thiz.onFirstEditAfterRestore());
-      updateHeight();
+      window.CTMLayout.fitEditor(thiz.editor, thiz.editorDiv);
       thiz.updateInputGate();
       thiz.ctmStoreHandle = globalThis.qpyodideStorage?.attach(thiz);
     });

@@ -85,7 +85,7 @@ def main():
             path = target / name if name else target
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-    RECORD.write_text(json.dumps({'repository': 'Erasmus-CTM/ctm-libs', 'commit': commit}, indent=2) + '\n')
+    RECORD.write_bytes((json.dumps({'repository': 'Erasmus-CTM/ctm-libs', 'commit': commit}, indent=2) + '\n').encode('utf-8'))
     print('Shipped ctm-libs', commit)
 
 

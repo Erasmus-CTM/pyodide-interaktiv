@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 import unittest
 
@@ -25,6 +27,36 @@ class GeneratedReportTests(unittest.TestCase):
             self.assertEqual(file["bytes"], len(data))
             self.assertEqual(file["sha256"], hashlib.sha256(data).hexdigest())
             self.assertEqual(file["git_blob"], report.blob_sha(data))
+
+    def test_canonical_sync_records_lf_bytes_on_every_platform(self):
+        # Exercise the actual writer with binary/text copies, without depending
+        # on a platform's default newline translation or external repository.
+        spec = importlib.util.spec_from_file_location("sync", Path(__file__).resolve().parents[1] / "scripts/sync-ctm-libs.py")
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / "source", root / "target"
+            (source / "_extensions/ctm-libs/lua").mkdir(parents=True)
+            (source / "_extensions/ctm-libs/lua/ctm.lua").write_bytes(b"-- fixture")
+            (source / "templates/ai-feedback").mkdir(parents=True)
+            (target / ".github").mkdir(parents=True)
+            record = target / ".github/ctm-libs-source.json"
+            files = {
+                "_extensions/ctm-libs": {"lua/ctm.lua": b"-- fixture"},
+                "templates/ai-feedback": {"forward.lua": b"-- forward"},
+                "bootstrap/ctm-bootstrap.lua": {"": b"-- bootstrap"},
+            }
+            with patch.object(sync, "ROOT", target), patch.object(sync, "RECORD", record), \
+                    patch.object(sync, "tracked", side_effect=lambda _, path: files[path]), \
+                    patch.object(sync.subprocess, "check_output", return_value="a" * 40), \
+                    patch("sys.argv", ["sync-ctm-libs.py", str(source)]), contextlib.redirect_stdout(io.StringIO()):
+                sync.main()
+            data = record.read_bytes()
+            self.assertNotIn(b"\r", data)
+            self.assertEqual(data.count(b"\n"), 4)
+            self.assertEqual(json.loads(data)["commit"], "a" * 40)
+            self.assertEqual((target / "_extensions/ctm-libs/lua/ctm.lua").read_bytes(), b"-- fixture")
 
     def test_bounded_chunks_reconstruct_and_have_complete_manifest(self):
         result = report.build_report("a" * 40, "b" * 40, {}, {"large": b"x" * 10001, "empty": b""})
