@@ -4,9 +4,14 @@
 // (see qpyodide-cell-classes.js) and runs the setup/output/autorun cells
 // once the cells may run.
 
-qpyodideCellDetails.forEach((entry) => {
-  qpyodideCellContainer.addCell(qpyodideCreateCell(entry));
-});
+globalThis.qpyodideBuildingInitialUI = true;
+try {
+  qpyodideCellDetails.forEach((entry) => {
+    qpyodideCellContainer.addCell(qpyodideCreateCell(entry));
+  });
+} finally {
+  globalThis.qpyodideBuildingInitialUI = false;
+}
 
 // Hook up Quarto's global "Code" tools (Show All Code / Hide All Code,
 // rendered when `code-tools: true`). Quarto's own handler (in
