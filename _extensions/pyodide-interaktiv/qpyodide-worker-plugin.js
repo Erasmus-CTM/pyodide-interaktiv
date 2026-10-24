@@ -172,7 +172,9 @@ registerPlugin(function (api) {
   let plotSetup = null;
   async function ensurePlotSetup(pyodide) {
     if (plotSetup === true) return;
-    if (plotSetup !== null && !(pyodide.loadedPackages && pyodide.loadedPackages.matplotlib)) return;
+    // Import loading runs first: plain Python needs no plotting setup, and
+    // a later matplotlib import can enable figure collection on that run.
+    if (!(pyodide.loadedPackages && pyodide.loadedPackages.matplotlib)) return;
     try {
       await pyodide.runPythonAsync(PY_SETUP);
       plotSetup = true;

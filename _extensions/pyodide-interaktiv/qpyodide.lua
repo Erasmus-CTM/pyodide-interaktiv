@@ -115,6 +115,7 @@ local homeDir = "/home/pyodide"
 
 -- Define whether a startup status message should be displayed
 local showStartUpMessage = "true"
+local preloadPackages = "true"
 
 -- Define an empty string if no packages need to be installed.
 local installPythonPackagesList = "''"
@@ -549,6 +550,7 @@ local function setPyodideOptionsFromSettings(meta)
   if base or variant then setIndexURL() end
   homeDir = text("home-dir") or homeDir
   showStartUpMessage = tostring(onOff("show-startup-message", true))
+  preloadPackages = tostring(onOff("preload-packages", true))
   -- Feedback is on unless pyodide: feedback: false, and only in builds with
   -- AI feedback (P22, asked directly: no dependence on the filter order). An
   -- explicit pyodide: feedback: true on a page with cells is a request, which
@@ -630,6 +632,7 @@ local function initializationPyodide()
     ["CANVASBACKEND"] = canvasBackend,
     ["HOMEDIR"] = jsStringEscape(homeDir),
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
+    ["PRELOADPACKAGES"] = preloadPackages,
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
     ["QPYODIDECELLDETAILS"] = cellDetails,
     ["FEEDBACKENABLED"] = feedbackEnabled,

@@ -9,7 +9,8 @@
 // (pyodide_http, micropip, matplotlib) in the background, without getting in
 // the way of other components' checks. This extension's cells wait for both:
 // Run buttons, the "ready" status and the startup cells follow the second
-// stage, so the learner sees what she saw before.
+// stage, so the learner sees what she saw before. With preload-packages:
+// false the second stage has no automatic packages; readiness still follows it.
 //
 // Global interfaces for other modules/extensions (set by CTMWorker):
 //   qpyodideReady    – Promise that resolves with the Pyodide proxy (the
@@ -103,7 +104,7 @@ qpyodideFollowWorker(CTMWorker.start({
   // the backend the plot setup would set.
   env: { ...qpyodideCustomizedPyodideOptions.env, MPLBACKEND: "AGG" },
   packages: qpyodideSetupPythonPackages ? qpyodideInstallPythonPackagesList : [],
-  background: {
+  background: globalThis.qpyodidePreloadPackages === false ? {} : {
     packages: ["pyodide_http", "micropip", "matplotlib"],
     // Shim requests/urllib3 (synchronous XHR is allowed in the worker)
     run: "import pyodide_http\npyodide_http.patch_all()"

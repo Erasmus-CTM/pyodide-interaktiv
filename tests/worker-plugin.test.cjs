@@ -20,8 +20,8 @@ function fakePyodide({setupFails = false} = {}) {
   const ran = [], fake = {loadedPackages: {}, ran};
   fake.loadPackagesFromImports = async () => {};
   fake.runPythonAsync = async code => {
-    ran.push(code.startsWith('import matplotlib') ? 'PY_SETUP' : code);
-    if (code.startsWith('import matplotlib') && setupFails) throw new Error('No module named matplotlib');
+    ran.push(code.startsWith('import matplotlib\n') ? 'PY_SETUP' : code);
+    if (code.startsWith('import matplotlib\n') && setupFails) throw new Error('No module named matplotlib');
     if (code === 'raise') throw new Error('Traceback: ValueError');
     if (code === '"<b>bold</b>"') return '<b>bold</b>';
     return undefined;
@@ -40,6 +40,7 @@ test('stage 1: the input() hook sets the prompt through the worker\'s setPrompt'
 
 test('runCell: the plot setup once, at the first run; output, HTML and figures as in 1.8', async () => {
   const py = fakePyodide();
+  py.loadedPackages.matplotlib = 'default channel';
   const p = plugin(py);
   let result = await p.registered.commands.runCell({code: 'print(1)', wantPickle: false});
   assert.deepEqual(py.ran, ['PY_SETUP', 'print(1)']);
@@ -54,13 +55,34 @@ test('runCell: the plot setup once, at the first run; output, HTML and figures a
 
 test('a failed plot setup: cells run without figure collection, and it is tried again once matplotlib is there (N4)', async () => {
   const py = fakePyodide({setupFails: true});
+  py.loadedPackages.matplotlib = 'default channel';
   const p = plugin(py);
   let result = await p.registered.commands.runCell({code: 'print(1)'});
   assert.deepEqual([...result.entries], []);
   assert.deepEqual([...result.images], []);
+  delete py.loadedPackages.matplotlib;
   await p.registered.commands.runCell({code: 'print(2)'});
   assert.deepEqual(py.ran, ['PY_SETUP', 'print(1)', 'print(2)'], 'not tried again without matplotlib');
   py.loadedPackages.matplotlib = 'default channel';
   await p.registered.commands.runCell({code: 'print(3)'});
   assert.deepEqual(py.ran.slice(-2), ['PY_SETUP', 'print(3)']);
+});
+
+test('plain Python skips plot setup; a later import loads matplotlib before setup and figures', async () => {
+  const py = fakePyodide();
+  const imported = [];
+  py.loadPackagesFromImports = async code => {
+    imported.push(code);
+    if (code.includes('import matplotlib')) py.loadedPackages.matplotlib = 'imported on demand';
+  };
+  const p = plugin(py);
+  const first = await p.registered.commands.runCell({code: 'print(42)'});
+  assert.deepEqual(py.ran, ['print(42)']);
+  assert.deepEqual([...first.images], []);
+  const plotted = await p.registered.commands.runCell({code: 'import matplotlib.pyplot as plt\nplt.plot([1, 2]); plt.show()'});
+  assert.deepEqual(py.ran.slice(-2), ['PY_SETUP', 'import matplotlib.pyplot as plt\nplt.plot([1, 2]); plt.show()']);
+  assert.deepEqual([...plotted.images], ['PNG']);
+  await p.registered.commands.runCell({code: 'print(7)'});
+  assert.equal(py.ran.filter(code => code === 'PY_SETUP').length, 1);
+  assert.equal(imported.length, 3, 'every edited run still resolves its own imports');
 });

@@ -27,7 +27,7 @@ const CELLS = [
 
 // A page as qpyodide.lua writes it: the settings, ctm-libs' catalogue and
 // worker, then this extension's modules in their order.
-function page({cells = CELLS, isolated = false} = {}) {
+function page({cells = CELLS, isolated = false, preloadPackages = true, packages = ['']} = {}) {
   const dom = new JSDOM('<header id="title-block-header"></header><main>'
     + cells.map(cell => `<div id="qpyodide-insertion-location-${cell.id}"></div>`).join('') + '</main>',
   {url: 'https://course.invalid/page.html', runScripts: 'outside-only'});
@@ -52,7 +52,8 @@ function page({cells = CELLS, isolated = false} = {}) {
   w.console = {log() {}, warn() {}, error() {}, info() {}};
   // The settings script (qpyodide-document-settings.js, rendered).
   Object.assign(w, {
-    qpyodideInstallPythonPackagesList: [''], qpyodideSetupPythonPackages: false, qpyodideShowStartupMessage: true,
+    qpyodideInstallPythonPackagesList: packages, qpyodideSetupPythonPackages: !packages.includes(''), qpyodideShowStartupMessage: true,
+    qpyodidePreloadPackages: preloadPackages,
     qpyodideCustomizedPyodideOptions: {indexURL: 'https://cdn.example/pyodide/v0.28.3/full/', env: {HOME: '/home/pyodide'}},
     qpyodideCanvasBackend: 'webagg', qpyodideLang: 'en', qpyodideCellDetails: cells,
     qpyodideFeedbackOptions: {enabled: false, storage: 'session', hints: true, uiLanguage: 'en'},
@@ -337,5 +338,31 @@ test('S9 (set review): Runs clicked on two cells during the setup cells both run
   for (let round = 0; round < 12; round++) { answerRuns(p.workers[0], answered); for (let i = 0; i < 4; i++) await tick(); }
   assert.deepEqual(p.runCells(p.workers[0]), ['A = 1', 'B = A + 1', 'print("second", B)', 'print("first", B)'], 'no click is lost');
   assert.ok(p.runButtons().every(b => !b.disabled && b.textContent.trim() !== waiting), 'Run is free again');
+  p.w.close();
+});
+
+test('no-preload IDE keeps explicit packages and normal setup/restart readiness', async () => {
+  const p = page({cells: [CELLS[0]], preloadPackages: false, packages: ['networkx']});
+  const [worker] = p.workers;
+  const init = worker.posted.find(m => m.type === 'init');
+  assert.deepEqual({...init.config.background}, {});
+  assert.deepEqual([...init.config.packages], ['networkx']);
+  await p.stage1(0);
+  assert.equal(p.w.qpyodideCellsReady, false, 'no readiness bypass');
+  worker.reply({type: 'setup', ok: true});
+  await tick();
+  assert.equal(p.w.qpyodideCellsReady, true);
+  assert.ok(p.runButtons().every(button => !button.disabled));
+  const restarted = p.w.mainPyodide.restart();
+  assert.equal(p.w.qpyodideCellsReady, false);
+  assert.ok(p.runButtons().every(button => button.disabled));
+  const again = p.workers[1];
+  assert.deepEqual({...again.posted.find(m => m.type === 'init').config.background}, {});
+  await p.stage1(1);
+  again.reply({type: 'setup', ok: true});
+  await restarted;
+  await tick();
+  assert.equal(p.w.qpyodideCellsReady, true);
+  assert.ok(p.runButtons().every(button => !button.disabled));
   p.w.close();
 });
