@@ -8,6 +8,11 @@
 // module qpyodide-feedback.js – it attaches to the anchor created here,
 // `#qpyodide-status-message-area`.
 
+// Publish the decision immediately, before the engine module and other
+// consumers. Waiting for initial UI never depends on Python/setup/startup cells.
+let qpyodideAllowStartup;
+globalThis.qpyodideCoiSettled = new Promise((resolve) => { qpyodideAllowStartup = resolve; });
+
 // Declare startup message element globally
 globalThis.qpyodideStartupMessage = document.createElement("p");
 
@@ -23,6 +28,10 @@ globalThis.qpyodideStartupMessage = document.createElement("p");
 // qpyodide-cell-classes.js).
 function qpyodideSetInputState(kind) {
   globalThis.qpyodideInputState = kind;
+  if (kind !== "check") {
+    globalThis.qpyodideCoiCanStart = true;
+    qpyodideAllowStartup();
+  }
   window.dispatchEvent(new CustomEvent("qpyodide-input-state", { detail: kind }));
 }
 globalThis.qpyodideInputAvailable = () => globalThis.qpyodideInputState === "ok";
@@ -33,11 +42,14 @@ qpyodideSetInputState(globalThis.crossOriginIsolated ? "ok" : "check");
 // happening mid-input and discarding code already typed.
 let qpyodideUserInteracted = false;
 ["keydown", "pointerdown", "input"].forEach((evt) =>
-  window.addEventListener(evt, () => { qpyodideUserInteracted = true; },
+  window.addEventListener(evt, () => {
+      qpyodideUserInteracted = true;
+      if (globalThis.qpyodideInputState === "check") qpyodideSetInputState("needs-reload");
+    },
     { capture: true, passive: true }));
 
-// Automatic check reload: as soon as coi-serviceworker.js has registered
-// the service worker (event "coi-sw-ready"), reload once automatically so
+// Automatic check reload: when coi-serviceworker.js is ready and initial UI
+// has settled, reload once automatically so
 // that input() (SharedArrayBuffer) becomes available – unless the user is
 // already typing somewhere at that moment, in which case it's skipped for
 // this session (no loss of unsaved code). Runs independently of the
@@ -90,16 +102,21 @@ if (globalThis.crossOriginIsolated) {
       return failed > 0 && Date.now() - failed < QPYODIDE_COI_FAILED_MS;
     } catch (ex) { return false; /* blocked */ }
   }
-  function qpyodideHandleCoiReady() {
+  let qpyodideReloadWaiting = false;
+  let qpyodideReloadCommitted = false;
+  let qpyodideReloadTimer = null;
+  const QPYODIDE_COI_UI_DEADLINE_MS = 30000;
+
+  function qpyodideReloadEligible() {
     if (qpyodideUserInteracted) {
       console.log("[qpyodide-coi] ready, but the user has already interacted – reload skipped.");
       qpyodideSetInputState("needs-reload");
-      return;
+      return null;
     }
     if (qpyodideCheckFailedRecently()) {
       console.log("[qpyodide-coi] the check reload did not isolate this origin within the last 24 hours – input() is unavailable here.");
       qpyodideSetInputState("unavailable");
-      return;
+      return null;
     }
     const reloads = qpyodideReloadsRecently();
     const controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
@@ -107,17 +124,48 @@ if (globalThis.crossOriginIsolated) {
       console.log("[qpyodide-coi] reloaded a moment ago and still not isolated – input() is unavailable here.");
       try { localStorage.setItem(QPYODIDE_COI_FAILED, String(Date.now())); } catch (ex) { /* blocked */ }
       qpyodideSetInputState("unavailable");
-      return;
+      return null;
     }
-    console.log("[qpyodide-coi] ready – triggering reload.");
-    try {
-      sessionStorage.setItem("qpyodide-coi-reload-pending", "1");
-      sessionStorage.setItem(QPYODIDE_COI_SENT, String(Date.now()));
-      sessionStorage.setItem(QPYODIDE_COI_COUNT, String(reloads + 1));
-    } catch (ex) { /* blocked */ }
-    location.reload();
+    return reloads;
+  }
+  function qpyodideKeepCurrentDocument() {
+    qpyodideReloadWaiting = false;
+    clearTimeout(qpyodideReloadTimer);
+    qpyodideSetInputState("needs-reload");
+  }
+  function qpyodideHandleCoiReady() {
+    if (globalThis.qpyodideCoiCanStart || qpyodideReloadWaiting || qpyodideReloadCommitted || qpyodideReloadEligible() === null) return;
+    qpyodideReloadWaiting = true;
+    // A deadline cancels automatic navigation; it is never a delayed reload.
+    // Slow/broken UI stays usable and Python may start without shared buffers.
+    qpyodideReloadTimer = setTimeout(() => {
+      console.log("[qpyodide-coi] initial UI did not settle in 30s – automatic reload skipped.");
+      qpyodideKeepCurrentDocument();
+    }, QPYODIDE_COI_UI_DEADLINE_MS);
+    Promise.resolve().then(() => MathExerciseRuntime.whenInitialUIReady()).then(() => {
+      if (!qpyodideReloadWaiting) return;
+      qpyodideReloadWaiting = false;
+      clearTimeout(qpyodideReloadTimer);
+      // Input during the wait must prevent both navigation and reload flags.
+      const reloads = qpyodideReloadEligible();
+      if (reloads === null) return;
+      qpyodideReloadCommitted = true;
+      console.log("[qpyodide-coi] initial UI ready – triggering reload.");
+      try {
+        sessionStorage.setItem("qpyodide-coi-reload-pending", "1");
+        sessionStorage.setItem(QPYODIDE_COI_SENT, String(Date.now()));
+        sessionStorage.setItem(QPYODIDE_COI_COUNT, String(reloads + 1));
+      } catch (ex) { /* blocked */ }
+      location.reload();
+      // Do not release Python in the document being replaced.
+    }, (error) => {
+      console.error("qpyodide: initial UI failed before isolation reload", error);
+      if (qpyodideReloadWaiting) qpyodideKeepCurrentDocument();
+    });
   }
   function qpyodideHandleCoiUnavailable() {
+    qpyodideReloadWaiting = false;
+    clearTimeout(qpyodideReloadTimer);
     console.log("[qpyodide-coi] unavailable.");
     qpyodideSetInputState("unavailable");
   }

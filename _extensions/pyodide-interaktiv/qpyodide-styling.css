@@ -121,6 +121,10 @@ fieldset:disabled .qpyodide-button {
 
 .qpyodide-icon-status-spinner {
   color: var(--bs-primary, #7894c4);
+  /* Keep the loading icon square before and after Font Awesome SVG replacement. */
+  display: inline-block;
+  width: 1em;
+  height: 1em;
 }
 
 /* ---------------------------------------------------------------------- */
