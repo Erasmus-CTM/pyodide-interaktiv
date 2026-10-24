@@ -27,7 +27,7 @@ const CELLS = [
 
 // A page as qpyodide.lua writes it: the settings, ctm-libs' catalogue and
 // worker, then this extension's modules in their order.
-function page({cells = CELLS, isolated = false, preloadPackages = true, packages = ['']} = {}) {
+function page({cells = CELLS, isolated = false, preloadPackages = true, packages = [''], coiOutcome = 'unavailable', initialUI = Promise.resolve()} = {}) {
   const dom = new JSDOM('<header id="title-block-header"></header><main>'
     + cells.map(cell => `<div id="qpyodide-insertion-location-${cell.id}"></div>`).join('') + '</main>',
   {url: 'https://course.invalid/page.html', runScripts: 'outside-only'});
@@ -49,6 +49,8 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   w.URL.createObjectURL = () => 'blob:worker';
   w.URL.revokeObjectURL = () => {};
   w.crossOriginIsolated = isolated;
+  w.qpyodideCoiOutcome = coiOutcome;
+  w.MathExerciseRuntime = {whenInitialUIReady: () => initialUI};
   w.console = {log() {}, warn() {}, error() {}, info() {}};
   // The settings script (qpyodide-document-settings.js, rendered).
   Object.assign(w, {
@@ -365,4 +367,22 @@ test('no-preload IDE keeps explicit packages and normal setup/restart readiness'
   assert.equal(p.w.qpyodideCellsReady, true);
   assert.ok(p.runButtons().every(button => !button.disabled));
   p.w.close();
+});
+
+test('first visit publishes a shared promise before COI, and interaction starts exactly one worker without awaiting UI', async()=>{
+  const p=page({cells:[CELLS[0]],coiOutcome:'ready',initialUI:new Promise(()=>{})});
+  assert.equal(p.workers.length,0); assert.equal(typeof p.w.qpyodideInstance.then,'function');
+  assert.equal(p.w.qpyodideReady,p.w.qpyodideInstance);
+  p.w.dispatchEvent(new p.w.Event('input')); await tick();
+  assert.equal(p.workers.length,1); assert.deepEqual(p.runCells(p.workers[0]),[]);
+  await p.stage1(0); p.workers[0].reply({type:'setup',ok:true}); await tick();
+  assert.equal(p.w.qpyodideCellsReady,true); assert.deepEqual(p.runCells(p.workers[0]),[],'interactive learner cell never autoruns');
+  p.w.close();
+});
+
+test('fatal worker error during package setup keeps Run disabled and reports engine failure',async()=>{
+  const p=page({cells:[CELLS[0]]});await p.stage1(0);
+  p.workers[0].onerror({message:'worker crashed'});await tick();
+  assert.equal(p.w.qpyodideCellsReady,false);assert.ok(p.runButtons().every(b=>b.disabled));
+  assert.match(p.status(),/worker crashed/);assert.equal(p.workers.length,1);p.w.close();
 });

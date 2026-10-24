@@ -1,0 +1,29 @@
+name: Preserve runtime dependency order
+# Retained fixed-tuple comparison; broad campaigns are explicitly authorized.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'AC authorization: enter broad testing campaign'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  authorize:
+    name: Authorize broad runtime-order campaign
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit campaign confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: test "$CONFIRMATION" = 'broad testing campaign'
+  actual-course:
+    needs: authorize
+    uses: Erasmus-CTM/ctm-assessment/.github/workflows/compare-courses.yml@9489b10c764f22c7aa4ae11867e6c6d74c596de9
+    with:
+      tooling-ref: 9489b10c764f22c7aa4ae11867e6c6d74c596de9
+      course: aacchhee/ingmat3a_ntnu
+      course-ref: e45851080f462e84cde281528f21d4f21292a6ba
+      base: 294d5b86d06af5fecb5fcf50dc4562b17ee5c273
+      head: a628299e5ae719a4077c9c440d39f4e4914a547d

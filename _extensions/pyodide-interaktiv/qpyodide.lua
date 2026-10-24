@@ -14,6 +14,11 @@ local function requireAssets()
     ctm.fail("pyodide-interaktiv needs the shared assets API. Update CTM Assessment: " .. INSTALL
       .. "; or reinstall the standalone extension: " .. STANDALONE)
   end
+  local layout = ctm.layout
+  if type(layout) ~= "table" or type(layout.use) ~= "function" then
+    ctm.fail("pyodide-interaktiv needs the shared layout API. Update CTM Assessment: " .. INSTALL
+      .. "; or reinstall the standalone extension: " .. STANDALONE)
+  end
 end
 
 ----
@@ -716,6 +721,7 @@ local function ensurePyodideSetup()
   -- this extension did. Under `embed-resources: true` the script is inlined
   -- and cannot register itself; Python works without it (Stop restarts the
   -- worker -- see Known limitations).
+  ctm.layout.use()
   ctm.runtime.worker()
 
   local initializedConfigurationPyodide = initializationPyodide()
@@ -1598,6 +1604,9 @@ local function finalizePendingCell(entry)
   end
   local interactive = entry.options.context ~= "setup" and entry.options.context ~= "output"
   if entry.options.context ~= "setup" then
+    -- Keep the runtime/worker ahead of the locale dependencies registered by
+    -- the shared store. Full document setup still waits for stitchDocument().
+    ctm.runtime.worker()
     local primarySave = save
     if not interactive or entry.options["read-only"] == "true" then primarySave = false end
     local record = ctm.ui.exercise({component = "pyodide-interaktiv", id = id, source = source, save = primarySave})

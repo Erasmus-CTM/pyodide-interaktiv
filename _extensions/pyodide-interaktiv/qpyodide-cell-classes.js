@@ -294,6 +294,9 @@ function qpyodidePlotDownloads(host, images, label) {
   });
 }
 
+// Set only while the page mounts its collected cells, including restored extras.
+globalThis.qpyodideBuildingInitialUI = false;
+
 class EditorUnit {
   /**
    * @param {Object} config
@@ -630,98 +633,96 @@ class EditorUnit {
   initMonaco() {
     const thiz = this;
 
-    require(["vs/editor/editor.main"], function () {
-      thiz.editor = monaco.editor.create(thiz.editorDiv, {
-        // Restored, saved code (if any) takes the editor's initial value --
-        // the original course code stays available via __qpyodideinitialCode
-        // below for the Reset button. Never auto-run either way.
-        value: thiz.savedCode != null ? thiz.savedCode : thiz.code,
-        language: "python",
-        theme: qpyodideMonacoTheme(),
-        automaticLayout: true,           // Works wonderfully with RevealJS
-        scrollBeyondLastLine: false,
-        minimap: { enabled: false },
-        fontSize: "17.5pt",              // Bootstrap is 1 rem
-        renderLineHighlight: "none",     // Disable current line highlighting
-        hideCursorInOverviewRuler: true, // Remove cursor indicator in scroll bar
-        readOnly: thiz.isReadOnly
-      });
-
-      // Store metadata on the editor (e.g. for other extensions)
-      thiz.editor.__qpyodideCounter = thiz.uid;
-      thiz.editor.__qpyodideEditorId = `qpyodide-editor-${thiz.uid}`;
-      thiz.editor.__qpyodideinitialCode = thiz.code;
-      thiz.editor.__qpyodideOptions = thiz.options;
-
-      // Set at the model level the preferred end of line (EOL) character to LF.
-      // This prevents `\r\n` from being given to the Pyodide engine on Windows.
-      // See details in: https://github.com/coatless/quarto-Pyodide/issues/94
-      const model = thiz.editor.getModel();
-      model.setEOL(monaco.editor.EndOfLineSequence.LF);
-
-      // Dynamically adjust editor height to fit the content
-      const updateHeight = () => {
-        const contentHeight = thiz.editor.getContentHeight();
-        thiz.editorDiv.style.height = `${contentHeight}px`;
-        thiz.editor.layout();
-      };
-
-      const isEmptyCodeText = (selected) =>
-        (selected === null || selected === undefined || selected === "");
-
-      // Keyboard shortcuts must be re-registered per editor on focus change
-      // (Monaco regression since 0.32.0):
-      // https://github.com/microsoft/monaco-editor/issues/2947
-      // addCommand registers a page-wide keybinding; the context key limits it
-      // to this extension's editors, so other Monaco editors on the page (for
-      // example py-exercise) keep their own keys.
-      const shortcutContext = typeof thiz.editor.createContextKey === 'function'
-        ? (thiz.editor.createContextKey('qpyodideCellEditor', true), 'qpyodideCellEditor') : undefined;
-      const addPyodideKeyboardShortCutCommands = () => {
-        // Shift+Enter: run the entire cell content
-        thiz.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
-          thiz.runCode(thiz.editor.getValue());
-        }, shortcutContext);
-
-        // Ctrl/Cmd+Enter: run the selection (or the current line)
-        thiz.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-          const selectedText = thiz.editor.getModel()
-            .getValueInRange(thiz.editor.getSelection());
-
-          if (isEmptyCodeText(selectedText)) {
-            const currentPosition = thiz.editor.getPosition();
-            const currentLine = thiz.editor.getModel()
-              .getLineContent(currentPosition.lineNumber);
-
-            const newPosition = new monaco.Position(currentPosition.lineNumber + 1, 1);
-            if (newPosition.lineNumber > thiz.editor.getModel().getLineCount()) {
-              thiz.editor.executeEdits("addNewLine", [{
-                range: new monaco.Range(newPosition.lineNumber, 1, newPosition.lineNumber, 1),
-                text: "\n",
-                forceMoveMarkers: true,
-              }]);
+    const initialUI = new Promise((resolve, reject) => {
+      require(["vs/editor/editor.main"], function () {
+        try {
+        thiz.editor = monaco.editor.create(thiz.editorDiv, {
+          // Restored, saved code (if any) takes the editor's initial value --
+          // the original course code stays available via __qpyodideinitialCode
+          // below for the Reset button. Never auto-run either way.
+          value: thiz.savedCode != null ? thiz.savedCode : thiz.code,
+          language: "python",
+          theme: qpyodideMonacoTheme(),
+          automaticLayout: false,
+          scrollBeyondLastLine: false,
+          minimap: { enabled: false },
+          fontSize: "17.5pt",              // Bootstrap is 1 rem
+          renderLineHighlight: "none",     // Disable current line highlighting
+          hideCursorInOverviewRuler: true, // Remove cursor indicator in scroll bar
+          readOnly: thiz.isReadOnly
+        });
+  
+        // Store metadata on the editor (e.g. for other extensions)
+        thiz.editor.__qpyodideCounter = thiz.uid;
+        thiz.editor.__qpyodideEditorId = `qpyodide-editor-${thiz.uid}`;
+        thiz.editor.__qpyodideinitialCode = thiz.code;
+        thiz.editor.__qpyodideOptions = thiz.options;
+  
+        // Set at the model level the preferred end of line (EOL) character to LF.
+        // This prevents `\r\n` from being given to the Pyodide engine on Windows.
+        // See details in: https://github.com/coatless/quarto-Pyodide/issues/94
+        const model = thiz.editor.getModel();
+        model.setEOL(monaco.editor.EndOfLineSequence.LF);
+  
+        const isEmptyCodeText = (selected) =>
+          (selected === null || selected === undefined || selected === "");
+  
+        // Keyboard shortcuts must be re-registered per editor on focus change
+        // (Monaco regression since 0.32.0):
+        // https://github.com/microsoft/monaco-editor/issues/2947
+        // addCommand registers a page-wide keybinding; the context key limits it
+        // to this extension's editors, so other Monaco editors on the page (for
+        // example py-exercise) keep their own keys.
+        const shortcutContext = typeof thiz.editor.createContextKey === 'function'
+          ? (thiz.editor.createContextKey('qpyodideCellEditor', true), 'qpyodideCellEditor') : undefined;
+        const addPyodideKeyboardShortCutCommands = () => {
+          // Shift+Enter: run the entire cell content
+          thiz.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+            thiz.runCode(thiz.editor.getValue());
+          }, shortcutContext);
+  
+          // Ctrl/Cmd+Enter: run the selection (or the current line)
+          thiz.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+            const selectedText = thiz.editor.getModel()
+              .getValueInRange(thiz.editor.getSelection());
+  
+            if (isEmptyCodeText(selectedText)) {
+              const currentPosition = thiz.editor.getPosition();
+              const currentLine = thiz.editor.getModel()
+                .getLineContent(currentPosition.lineNumber);
+  
+              const newPosition = new monaco.Position(currentPosition.lineNumber + 1, 1);
+              if (newPosition.lineNumber > thiz.editor.getModel().getLineCount()) {
+                thiz.editor.executeEdits("addNewLine", [{
+                  range: new monaco.Range(newPosition.lineNumber, 1, newPosition.lineNumber, 1),
+                  text: "\n",
+                  forceMoveMarkers: true,
+                }]);
+              }
+  
+              thiz.runCode(currentLine);
+              thiz.editor.setPosition(newPosition);
+            } else {
+              thiz.runCode(selectedText);
             }
-
-            thiz.runCode(currentLine);
-            thiz.editor.setPosition(newPosition);
-          } else {
-            thiz.runCode(selectedText);
-          }
-        }, shortcutContext);
-      };
-
-      thiz.editor.onDidFocusEditorText(addPyodideKeyboardShortCutCommands);
-      thiz.editor.onDidContentSizeChange(updateHeight);
-      // Code changes can add/remove input() -> re-evaluate the gate
-      thiz.editor.onDidChangeModelContent(() => { thiz.invalidateFeedback({preserveRunOutput: true}); thiz.updateInputGate(); });
-      // Autosave to localStorage (debounced), only for opted-in cells
-      thiz.editor.onDidChangeModelContent(() => thiz.scheduleSave());
-      // "Restored" must stop describing the content the instant it's edited
-      thiz.editor.onDidChangeModelContent(() => thiz.onFirstEditAfterRestore());
-      updateHeight();
-      thiz.updateInputGate();
-      thiz.ctmStoreHandle = globalThis.qpyodideStorage?.attach(thiz);
+          }, shortcutContext);
+        };
+  
+        thiz.editor.onDidFocusEditorText(addPyodideKeyboardShortCutCommands);
+        // Code changes can add/remove input() -> re-evaluate the gate
+        thiz.editor.onDidChangeModelContent(() => { thiz.invalidateFeedback({preserveRunOutput: true}); thiz.updateInputGate(); });
+        // Autosave to localStorage (debounced), only for opted-in cells
+        thiz.editor.onDidChangeModelContent(() => thiz.scheduleSave());
+        // "Restored" must stop describing the content the instant it's edited
+        thiz.editor.onDidChangeModelContent(() => thiz.onFirstEditAfterRestore());
+        window.CTMLayout.fitEditor(thiz.editor, thiz.editorDiv);
+        thiz.updateInputGate();
+        thiz.ctmStoreHandle = globalThis.qpyodideStorage?.attach(thiz);
+        resolve();
+        } catch (error) { reject(error); }
+      }, reject);
     });
+    if (globalThis.qpyodideBuildingInitialUI) globalThis.MathExerciseRuntime.trackInitialUI(initialUI);
   }
 
   /** Wires up button clicks (Run/Reset/Copy/Feedback). */
