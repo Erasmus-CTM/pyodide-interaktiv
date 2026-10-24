@@ -3,7 +3,7 @@
 -- (`quarto add Erasmus-CTM/pyodide-interaktiv` installs it). ctm.feedback is
 -- touched only inside the filter functions (step-3 design §18.4).
 local ctm = dofile(quarto.utils.resolve_path("ctm-bootstrap.lua"))("pyodide-interaktiv",
-  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 2})
+  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 3})
 local feedback = nil
 ----
 --- qpyodide.lua – Pandoc Lua filter of the `pyodide-interaktiv` extension
@@ -214,6 +214,7 @@ local qPyodideDefaultCellOptions = {
   ["code-fold"] = "",
   ["pdf-fallback"] = "",
   ["local-storage"] = "",
+  ["save"] = "",
   ["label"] = "",
   ["autorun"] = "",
   ["classes"] = "",
@@ -269,6 +270,12 @@ local function resolveLocalStorageEpoch(rawValue)
     return tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
   end
   return tostring(rawValue)
+end
+
+local resolvedStorageEpoch = nil
+local function storageEpoch()
+  if resolvedStorageEpoch == nil then resolvedStorageEpoch = resolveLocalStorageEpoch(localStorageEpoch) end
+  return resolvedStorageEpoch
 end
 
 -- Escapes a Lua string for safe embedding inside a double-quoted JS string
@@ -612,7 +619,7 @@ local function initializationPyodide()
     ["FEEDBACKSTORAGE"] = feedbackStorage,
     ["FEEDBACKHINTS"] = feedbackHints,
     ["LOCALSTORAGEENABLED"] = tostring(isTruthy(localStorageEnabled)),
-    ["LOCALSTORAGEEPOCH"] = jsStringEscape(resolveLocalStorageEpoch(localStorageEpoch)),
+    ["LOCALSTORAGEEPOCH"] = jsStringEscape(storageEpoch()),
     ["LANG"] = lang
   }
 
@@ -1525,9 +1532,42 @@ end
 -- Give the final, resolved RawInline insertion point for one already-
 -- reserved cell, in true document order -- see resolvePendingCells() below,
 -- which is the only caller.
+local storeHashCounts = {}
 local function finalizePendingCell(entry)
   missingPyodideCell = false
   qPyodideCounter = qPyodideCounter + 1
+  local epoch = storageEpoch()
+  local source = pandoc.utils.sha1(entry.code .. "\n" .. quarto.json.encode(entry.options) .. "\n" .. epoch):sub(1, 16)
+  local id = tostring(entry.options["label"] or ""):match("^%s*(.-)%s*$")
+  if id == "" then
+    storeHashCounts[source] = (storeHashCounts[source] or 0) + 1
+    id = "cell:" .. source .. (storeHashCounts[source] > 1 and (":" .. storeHashCounts[source]) or "")
+  end
+  -- Epochs must not offer a previous exam group's answer as changed-source data.
+  if epoch ~= "" then id = id .. ":epoch:" .. pandoc.utils.sha1(epoch):sub(1, 16) end
+  local save = entry.options["save"]
+  if isVariableEmpty(save) then save = entry.options["local-storage"] end
+  if isVariableEmpty(save) then
+    save = nil
+    if ctm.settings.get("pyodide", "save") == nil and ctm.settings.get("pyodide", "local-storage") ~= nil then
+      save = ctm.settings.bool("pyodide", "local-storage", {loose = true, digits = true, default = true})
+    end
+  end
+  local interactive = entry.options.context ~= "setup" and entry.options.context ~= "output"
+  if entry.options.context ~= "setup" then
+    local primarySave = save
+    if not interactive or entry.options["read-only"] == "true" then primarySave = false end
+    local record = ctm.ui.exercise({component = "pyodide-interaktiv", id = id, source = source, save = primarySave})
+    entry.options["ctm-store-id"] = id
+    entry.options["ctm-store-source"] = source
+    entry.options["ctm-store-save"] = record.save
+    if interactive then
+      local extraSource = pandoc.utils.sha1(source .. ":extra"):sub(1, 16)
+      local extra = ctm.ui.exercise({component = "pyodide-interaktiv", id = "extra:" .. id, source = extraSource, save = save})
+      entry.options["ctm-extra-source"] = extraSource
+      entry.options["ctm-extra-save"] = extra.save
+    end
+  end
   table.insert(qPyodideCapturedCodeBlocks, {
     id = qPyodideCounter,
     code = entry.code,
@@ -1945,7 +1985,11 @@ return {
     Span = resolvePendingCells
   },
   {
-    Pandoc = stitchDocument
+    Pandoc = function(doc)
+      doc = stitchDocument(doc)
+      if quarto.doc.is_format("html") then return ctm.ui.finalize(doc) end
+      return doc
+    end
   },
   -- The page's build message without AI feedback (P22): inside the CTM
   -- Assessment package ctm-libs' end filter prints it after every component;

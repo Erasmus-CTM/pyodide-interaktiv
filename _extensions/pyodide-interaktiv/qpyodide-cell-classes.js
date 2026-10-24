@@ -276,6 +276,24 @@ async function qpyodideRenderHtmlOutput(targetDiv, html) {
 // EditorUnit – a Monaco editor with toolbar and output areas
 // ---------------------------------------------------------------------------
 
+function qpyodidePlotDownloads(host, images, label) {
+  host.innerHTML = "";
+  host.classList.toggle("has-content", !!images?.length);
+  const ui = CTMLocales.table("ui", globalThis.qpyodideLang || "en");
+  (images || []).forEach((png, i) => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "btn btn-light btn-sm qpyodide-download-plot";
+    button.textContent = ui.downloadPlot + " — " + ui.figureLabel(i + 1);
+    button.setAttribute("aria-label", button.textContent + " (" + label + ")");
+    button.onclick = () => {
+      const link = document.createElement("a");
+      link.href = "data:image/png;base64," + png; link.download = "figure-" + (i + 1) + ".png";
+      document.body.appendChild(link); link.click(); link.remove();
+    };
+    host.appendChild(button);
+  });
+}
+
 class EditorUnit {
   /**
    * @param {Object} config
@@ -293,28 +311,18 @@ class EditorUnit {
     this.isReadOnly = options["read-only"] === "true";
     this.lastRunCode = null;   // code state of the last run
     this.lastOutput = null;    // retained execution result for existing callers
+    this.lastPlotImages = [];
     this.feedbackRevision = 0;
     this.outputRevision = 0;
     this.feedbackEvidence = null;
     this.feedbackHandle = null;
 
-    // Local-storage autosave: whether this cell could EVER use storage at
-    // all -- editable, and not permanently opted out via the course
-    // author's own `#| local-storage: false`. This is fixed for the cell's
-    // lifetime and gates whether any storage DOM/listeners get built at
-    // all. It's deliberately independent of the document default, the
-    // reader's device-wide toggle, and manual-save mode -- those can all
-    // change live (see cellEnabled()/isManualMode(), always re-read fresh,
-    // never cached) without needing a page reload; see refreshStorageUI().
+    // Saving policy/debounce belongs to CTMStore; the component owns only
+    // editor lifecycle and the old qpyodide key adapter.
     this.storageCapable = !this.isReadOnly && !!globalThis.qpyodideStorage &&
-      this.options["local-storage"] !== "false";
-    // Restoring previously saved code is NOT gated by whether saving is
-    // CURRENTLY allowed (doc default / reader toggle can be off right now)
-    // -- if something was saved while it WAS allowed, it must still show up
-    // here; otherwise turning the reader toggle off would look like it
-    // silently deleted the student's own code.
-    this.savedCode = this.storageCapable ? globalThis.qpyodideStorage.load(this.uid) : null;
-    this.saveTimer = null;
+      options["ctm-store-save"] !== false && options["ctm-store-save"] !== "false";
+    this.savedCode = null;
+    this.suppressStorageChanges = false;
 
     this.buildDom();
     this.initMonaco();
@@ -411,7 +419,14 @@ class EditorUnit {
     this.copyButton.type = "button";
     this.copyButton.id = `qpyodide-button-copy-${uid}`;
     this.copyButton.title = QP_L.copyTitle;
-    this.copyButton.innerHTML = '<i class="fa-regular fa-copy"></i>';
+    this.copyButton.textContent = QP_L.copyTitle;
+    this.copyButton.setAttribute("aria-label", QP_L.copyTitle + " (" + (this.options.label || uid) + ")");
+    this.copyOutputButton = document.createElement("button");
+    this.copyOutputButton.type = "button";
+    this.copyOutputButton.className = "btn btn-light btn-xs qpyodide-button qpyodide-button-copy-output";
+    this.copyOutputButton.textContent = CTMLocales.table("ui", qpyodideLang).copyOutput;
+    this.copyOutputButton.setAttribute("aria-label", this.copyOutputButton.textContent + " (" + (this.options.label || uid) + ")");
+    rightButtonsDiv.appendChild(this.copyOutputButton);
     rightButtonsDiv.appendChild(this.copyButton);
 
     // Feedback button (only when the feature is enabled and the cell is editable)
@@ -473,6 +488,8 @@ class EditorUnit {
     this.hostDiv.appendChild(this.inputHintDiv);
     this.hostDiv.appendChild(consoleAreaDiv);
     this.hostDiv.appendChild(this.outputGraphDiv);
+    this.plotDownloadsDiv = document.createElement("div");
+    this.hostDiv.appendChild(this.plotDownloadsDiv);
 
     // First gate check based on the initial code (the editor doesn't exist
     // yet; getCode() falls back to this.code).
@@ -522,7 +539,8 @@ class EditorUnit {
     const stored = globalThis.qpyodideStorage.load(this.uid);
     const live = this.editor ? this.editor.getValue() : stored;
     const original = this.code;
-    const meaningfullySaved = stored !== null && stored !== original && live !== original;
+    const hasStoredCode = stored !== null && stored !== original;
+    const meaningfullySaved = hasStoredCode && live === stored;
     const savableNow = !meaningfullySaved && globalThis.qpyodideStorage.cellEnabled(this.options);
     const visible = meaningfullySaved || savableNow;
     this.storageStatusLabel.hidden = !visible;
@@ -532,7 +550,7 @@ class EditorUnit {
     this.storageStatusLabel.textContent = meaningfullySaved
       ? (justRestored ? QP_L.storageRestoredStatus : QP_L.storageSavedStatus)
       : (savableNow ? QP_L.storageSavableStatus : "");
-    if (this.clearSavedButton) this.clearSavedButton.hidden = !meaningfullySaved;
+    if (this.clearSavedButton) this.clearSavedButton.hidden = !hasStoredCode;
     // Tracks whether the label is currently showing "Restored" specifically
     // -- onFirstEditAfterRestore() below watches this to flip it to
     // "Saved" the moment the restored text gets overwritten, since
@@ -544,10 +562,9 @@ class EditorUnit {
   /** Called on every editor content change. The "Restored" status only
    *  ever describes the code exactly as it was loaded from storage; once
    *  the student changes so much as one character, it stops being
-   *  accurate and must switch to the generic "Saved" wording right away --
-   *  independent of whether an actual write has happened yet (autosave is
-   *  debounced, and manual-save mode may not write until much later). The
-   *  underlying saved copy is untouched either way; only the label. */
+   *  accurate. Show the saving-enabled marker until the live text matches
+   *  an acknowledged stored value; a queued autosave is not an acknowledgement.
+   *  The underlying saved copy is untouched. */
   onFirstEditAfterRestore() {
     if (!this.showingRestored) return;
     this.updateStorageStatus(false);
@@ -564,20 +581,14 @@ class EditorUnit {
    *  right back on the next keystroke, silently undoing the deletion. */
   resetEditorToOriginal() {
     if (this.editor) {
-      this.editor.setValue(this.editor.__qpyodideinitialCode);
-      // setValue() above fires onDidChangeModelContent synchronously, which
-      // includes scheduleSave() -- left alone, that would debounce-save the
-      // (unchanged) original code right back ~500ms later, silently
-      // reviving the "Saved"/🗑 UI on a cell nothing actually changed in.
-      // Both callers (Reset button, "delete all local saves") already
-      // handle storage themselves right after this returns, so that
-      // scheduled write must never be allowed to fire.
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
+      this.suppressStorageChanges = true;
+      try { this.editor.setValue(this.editor.__qpyodideinitialCode); }
+      finally { this.suppressStorageChanges = false; }
     }
     this.lastRunCode = null;
     this.lastOutput = null;
-    [this.outputCodeDiv, this.outputFeedbackDiv, this.outputGraphDiv].forEach((div) => {
+    this.lastPlotImages = [];
+    [this.outputCodeDiv, this.outputFeedbackDiv, this.outputGraphDiv, this.plotDownloadsDiv].forEach((div) => {
       if (div.classList.contains("has-content")) {
         div.innerHTML = "";
         div.classList.remove("has-content");
@@ -610,14 +621,9 @@ class EditorUnit {
    *  never fires at all in manual-save mode -- there, only the Save button
    *  (see wireButtons()) writes. */
   scheduleSave() {
-    if (!this.storageCapable) return;
-    if (globalThis.qpyodideStorage.isManualMode()) return;
-    clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      if (!globalThis.qpyodideStorage.cellEnabled(this.options)) return;
-      globalThis.qpyodideStorage.save(this.uid, this.getCode());
-      this.updateStorageStatus(false);
-    }, 500);
+    if (this.suppressStorageChanges || !this.storageCapable) return;
+    globalThis.qpyodideStorage.changed(this.uid);
+    this.updateStorageStatus(false);
   }
 
   /** Creates the Monaco editor (height, EOL, keyboard shortcuts). */
@@ -714,6 +720,7 @@ class EditorUnit {
       thiz.editor.onDidChangeModelContent(() => thiz.onFirstEditAfterRestore());
       updateHeight();
       thiz.updateInputGate();
+      thiz.ctmStoreHandle = globalThis.qpyodideStorage?.attach(thiz);
     });
   }
 
@@ -723,9 +730,8 @@ class EditorUnit {
 
     this.runButton.onclick = () => thiz.runCode(thiz.getCode());
 
-    this.copyButton.onclick = () => {
-      navigator.clipboard.writeText(thiz.getCode() || "");
-    };
+    this.copyButton.onclick = () => CTMCopy.text(thiz.getCode() || "", {label: this.copyButton.getAttribute("aria-label")});
+    this.copyOutputButton.onclick = () => CTMCopy.text(thiz.outputCodeDiv.innerText || thiz.outputCodeDiv.textContent || "", {label: this.copyOutputButton.getAttribute("aria-label")});
 
     this.resetButton.onclick = () => {
       if (thiz.editor) {
@@ -760,7 +766,7 @@ class EditorUnit {
     // computer, without losing the in-progress edit view).
     if (this.clearSavedButton) {
       this.clearSavedButton.onclick = () => {
-        globalThis.qpyodideStorage.clear(thiz.uid);
+        globalThis.qpyodideStorage.clear(thiz.uid, {keepCode: true});
         thiz.updateStorageStatus(false);
       };
     }
@@ -1000,6 +1006,8 @@ class EditorUnit {
       if (result.html) qpyodideRenderHtmlOutput(this.outputCodeDiv, result.html);
       this.outputGraphDiv.innerHTML = "";
       qpyodideRenderPlots(this.outputGraphDiv, result, this.options);
+      this.lastPlotImages = result.images || [];
+      qpyodidePlotDownloads(this.plotDownloadsDiv, this.lastPlotImages, this.options.label || this.uid);
 
       // Terminal empty + no HTML → remove has-content (don't waste space)
       if (!terminalDiv.hasChildNodes() && !result.html) {
@@ -1228,19 +1236,21 @@ class InteractiveCell extends BaseCell {
     }
 
     function addExtraCodeBlock() {
+      if (thiz.extraUnit) return thiz.extraUnit;
       const extraHost = document.createElement("div");
       extraHost.className = "qpyodide-extra-codeblock";
       details.appendChild(extraHost);
 
       const extraOptions = { ...thiz.options, "read-only": "false", "autorun": "" };
-      thiz.units.push(new EditorUnit({
+      thiz.extraUnit = new EditorUnit({
         uid: extraUid,
-        code: "",   // the extra block's "original" is always empty
-        options: extraOptions,
+        code: "",
+        options: {...extraOptions, "ctm-store-save": thiz.options["ctm-extra-save"]},
         hostDiv: extraHost
-      }));
-
+      });
+      thiz.units.push(thiz.extraUnit);
       addCodeBlockButton.disabled = true;
+      return thiz.extraUnit;
     }
 
     addCodeBlockButton.onclick = addExtraCodeBlock;
@@ -1252,10 +1262,7 @@ class InteractiveCell extends BaseCell {
     // by the same condition EditorUnit itself uses for storageCapable, so
     // a cell later opted out via `#| local-storage: false` never grows a
     // phantom empty block just because an old save still exists for it.
-    if (parentIdentity && this.options["local-storage"] !== "false" &&
-        storage.hasSaved(extraUid)) {
-      addExtraCodeBlock();
-    }
+    if (parentIdentity) storage.prepareExtra(extraUid, addExtraCodeBlock);
 
     mainDiv.appendChild(details);
     this.insertionLocation.appendChild(mainDiv);
@@ -1308,7 +1315,16 @@ class OutputCell extends BaseCell {
     this.outputGraphDiv.className = "qpyodide-output-graph-area";
     mainDiv.appendChild(this.outputGraphDiv);
 
+    this.plotDownloadsDiv = document.createElement("div");
+    mainDiv.appendChild(this.plotDownloadsDiv);
+    const copyOutput = document.createElement("button");
+    copyOutput.type = "button"; copyOutput.className = "btn btn-light btn-sm qpyodide-button-copy-output";
+    copyOutput.textContent = CTMLocales.table("ui", globalThis.qpyodideLang || "en").copyOutput;
+    copyOutput.setAttribute("aria-label", copyOutput.textContent + " (" + (this.options.label || this.id) + ")");
+    copyOutput.onclick = () => CTMCopy.text(this.outputCodeDiv.innerText || this.outputCodeDiv.textContent || "", {label: copyOutput.getAttribute("aria-label")});
+    mainDiv.appendChild(copyOutput);
     this.insertionLocation.appendChild(mainDiv);
+    this.ctmStoreHandle = globalThis.qpyodideStorage?.attachOutput(this, mainDiv);
   }
 
   // Idempotent: runs again after a hard worker restart without
@@ -1329,6 +1345,8 @@ class OutputCell extends BaseCell {
     this.outputCodeDiv.classList.toggle("has-content", hasText || !!result.html);
 
     qpyodideRenderPlots(this.outputGraphDiv, result, this.options);
+    this.lastPlotImages = result.images || [];
+    qpyodidePlotDownloads(this.plotDownloadsDiv, this.lastPlotImages, this.options.label || this.id);
   }
 }
 

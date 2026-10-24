@@ -1,263 +1,201 @@
-// qpyodide-storage.js – localStorage autosave for editable Pyodide cells
-//
-// Opt-in via `pyodide: local-storage: true` (document YAML, see
-// globalThis.qpyodideLocalStorageOptions in qpyodide-document-settings.js)
-// or a per-cell `#| local-storage: true/false` override. When enabled for a
-// cell:
-//   - code typed into its editor is autosaved to localStorage (debounced),
-//     keyed by page path + a stable cell identity
-//   - on page load, saved code (if any) replaces the cell's original code
-//     in the editor -- but is NEVER executed automatically
-// Only source code is persisted -- never output or Python state, so nothing
-// here needs to serialize arbitrary interpreter state.
-//
-// Cell identity (stable across reorders where possible), resolved once per
-// page load from the full cellDetails list (document order):
-//   1. explicit `#| label: ...`          -- stable across content edits
-//   2. hash of the cell's original code  -- stable when cells move, not
-//                                           when their original code changes
-//   3. occurrence number appended to #2 when identical original code
-//      appears more than once on the page (last-resort disambiguation)
-// Numeric position is deliberately never used alone: inserting a cell
-// earlier on the page would shift every later position and restore code
-// into the wrong editor.
-//
-// Independent of the document/cell settings above, a student can switch
-// autosave off for themselves on this device -- a checkbox built by
-// qpyodide-storage-settings.js into its settings gear (isUserDisabled/setUserDisabled
-// below; this module owns no UI of its own). That preference is a hard
-// override: it wins even over a cell's own `#| local-storage: true`, applies
-// to every page on this site (not namespaced by path, unlike the saved code
-// itself -- it's a device-wide "leave nothing behind here" switch), and
-// persists until the student flips it back on.
-//
-// Turning it off never discards code already saved, and turning it back on
-// never needs a reload: cellEnabled() re-reads the preference fresh on every
-// call (see EditorUnit.scheduleSave() in qpyodide-cell-classes.js, which
-// re-checks right before it actually writes), and restoring previously
-// saved code into an editor never depended on this preference in the first
-// place -- only load() below, which only depends on the identity resolved.
-
-globalThis.qpyodideStorage = (function () {
-  const STORAGE_PREFIX = "qpyodide:code:";
-  // Deliberately NOT namespaced by page path: device-wide preferences, so
-  // setting them on one page carries over to every other page of the course.
-  const USER_DISABLED_KEY = "qpyodide:local-storage-user-disabled";
-  // Manual-save mode: off (autosave-as-you-type) by default; when on, each
-  // cell shows an explicit Save button instead and autosave never fires
-  // (see EditorUnit.scheduleSave() in qpyodide-cell-classes.js).
-  const MANUAL_MODE_KEY = "qpyodide:local-storage-manual-mode";
-
-  // Small, fast, non-cryptographic string hash (djb2) -- collisions are
-  // harmless here (worst case: two cells briefly share a save slot until
-  // one gets a `#| label:`), so this doesn't need to be cryptographically
-  // strong, just stable and cheap.
-  function djb2(str) {
+// Shared CTMStore adapter for editable Pyodide cells. Only code is persisted;
+// Python state and output stay in the live page. This module owns the old
+// qpyodide key format and manual-save preference, never a second answer store.
+globalThis.qpyodideStorage = (() => {
+  const MANUAL_KEY = "qpyodide:local-storage-manual-mode";
+  const entries = new Map();
+  const descriptors = new Map();
+  const text = () => CTMLocales.table("ui", globalThis.qpyodideLang || "en");
+  const store = () => globalThis.CTMStore;
+  function oldHash(value) {
     let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash * 33) ^ str.charCodeAt(i)) >>> 0;
-    }
+    for (let i = 0; i < value.length; i++) hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
     return hash.toString(36);
   }
-
-  // Same rule as qpyodideCreateCell() in qpyodide-cell-classes.js: every
-  // context except "output"/"setup" -- including the empty default that
-  // `main` uses since the echo/include mapping -- becomes an InteractiveCell.
-  function isInteractive(options) {
-    const context = (options && options.context) || "";
-    return context !== "output" && context !== "setup";
-  }
-
-  function computeIdentities(cellDetails) {
-    const seenHashes = Object.create(null);
-    const identities = Object.create(null);
-
-    (cellDetails || []).forEach((entry) => {
-      // Only editable, interactive cells ever get a code editor a student
-      // can type into -- output/setup cells have nothing to restore.
-      if (!isInteractive(entry.options)) return;
-
-      const label = (entry.options.label || "").trim();
-      if (label) {
-        identities[entry.id] = "label:" + label;
-        return;
-      }
-
-      const hash = djb2(entry.code || "");
-      const occurrence = (seenHashes[hash] = (seenHashes[hash] || 0) + 1);
-      identities[entry.id] = occurrence === 1
-        ? "hash:" + hash
-        : "hash:" + hash + ":" + occurrence;
+  const counts = Object.create(null);
+  for (const cell of globalThis.qpyodideCellDetails || []) {
+    if (["setup", "output"].includes(cell.options?.context)) continue;
+    const label = cell.options?.label?.trim();
+    // Old computeIdentities never counted labelled cells as hash occurrences.
+    // Counting them here would shift another cell's migrated answer.
+    const hash = oldHash(cell.code || "");
+    const n = label ? 0 : (counts[hash] = (counts[hash] || 0) + 1);
+    const legacy = label ? "label:" + label : "hash:" + hash + (n > 1 ? ":" + n : "");
+    descriptors.set(String(cell.id), {
+      id: cell.options?.["ctm-store-id"] || legacy,
+      source: cell.options?.["ctm-store-source"] || "",
+      save: cell.options?.["ctm-store-save"] !== false && cell.options?.["ctm-store-save"] !== "false",
+      original: cell.code || "", legacy, extraSource: cell.options?.["ctm-extra-source"], extraSave: cell.options?.["ctm-extra-save"]
     });
-
-    return identities;
   }
-
-  function storageKey(identity) {
-    // Keeps Week 1 / Week 2 / IDE page etc. separate: each lives at its own
-    // path, so each gets its own slice of localStorage.
-    //
-    // The epoch (off by default -- see `pyodide: local-storage-epoch:` in
-    // qpyodide.lua) is folded in first: when set, a key built under the
-    // current epoch can never match anything saved under a previous one, so
-    // load()/hasSaved() simply find nothing -- functionally identical to
-    // the old save having been cleared, without this module ever having to
-    // find and delete the actual old entries (they just become permanently
-    // unreachable bytes; harmless, and never surfaced back to a reader).
-    const epoch = globalThis.qpyodideLocalStorageOptions?.epoch || "";
-    const epochPart = epoch ? "epoch:" + epoch + ":" : "";
-    return STORAGE_PREFIX + epochPart + location.pathname + ":" + identity;
+  function getPreference(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+  function manual() { return getPreference(MANUAL_KEY) === "1"; }
+  function legacy(entry) {
+    return {
+      read() {
+        const epoch = globalThis.qpyodideLocalStorageOptions?.epoch || "";
+        const key = "qpyodide:code:" + (epoch ? "epoch:" + epoch + ":" : "") +
+          location.pathname + ":" + entry.description.legacy;
+        let code;
+        try { code = localStorage.getItem(key); } catch (_) { return null; }
+        return code === null ? null : {inputs: code === entry.description.original ? null : {code}, keys: [key]};
+      },
+      remove(candidate) { candidate.keys.forEach(key => { try { localStorage.removeItem(key); } catch (_) {} }); }
+    };
   }
-
-  // localStorage can throw (private browsing, disabled storage, quota) --
-  // that must never break the page, only silently skip persistence.
-  function safeGet(key) {
-    try { return window.localStorage.getItem(key); } catch (e) { return null; }
+  function writeCode(entry, code) {
+    entry.saved = code;
+    if (!entry.unit) { entry.pending = code; entry.mount?.(); }
+    if (!entry.unit?.editor) { entry.pending = code; return; }
+    const unit = entry.unit;
+    unit.suppressStorageChanges = true;
+    try { unit.editor.setValue(code); } finally { unit.suppressStorageChanges = false; }
+    unit.invalidateFeedback();
+    unit.updateInputGate();
+    unit.updateStorageStatus(true);
   }
-  function safeSet(key, value) {
-    try { window.localStorage.setItem(key, value); return true; } catch (e) { return false; }
+  function offerOld(entry) {
+    if (!entry.unit || !["changed", "withdrawn"].includes(entry.restored?.state) || entry.offer) return;
+    const panel = document.createElement("details");
+    panel.className = "qpyodide-saved-outdated";
+    const summary = document.createElement("summary");
+    summary.textContent = text().sourceChanged + " " + text().showSaved;
+    const code = document.createElement("pre");
+    code.textContent = entry.restored.record?.inputs?.code || "";
+    panel.append(summary, code); entry.unit.hostDiv.append(panel); entry.offer = panel;
   }
-  function safeRemove(key) {
-    try { window.localStorage.removeItem(key); } catch (e) { /* ignore */ }
+  // Core calls this only after matching the affected registered entry.
+  // Losing persistence is not an instruction to erase the live editor/output.
+  function forget(entry) {
+    entry.saved = null; entry.pending = null; entry.restored = null;
+    entry.offer?.remove(); entry.offer = null;
+    entry.unit?.updateStorageStatus(false);
   }
-
-  function isUserDisabled() {
-    return safeGet(USER_DISABLED_KEY) === "1";
-  }
-  function setUserDisabled(disabled) {
-    if (disabled) safeSet(USER_DISABLED_KEY, "1");
-    else safeRemove(USER_DISABLED_KEY);
-  }
-
-  function isManualMode() {
-    return safeGet(MANUAL_MODE_KEY) === "1";
-  }
-  function setManualMode(manual) {
-    if (manual) safeSet(MANUAL_MODE_KEY, "1");
-    else safeRemove(MANUAL_MODE_KEY);
-  }
-
-  const docEnabled = !!globalThis.qpyodideLocalStorageOptions?.enabled;
-  const identities = computeIdentities(globalThis.qpyodideCellDetails);
-
-  // Whether the toggle is worth showing at all: only if the feature could
-  // possibly apply to some cell on this page (document default, or at least
-  // one cell opting in on its own even though the document default is off).
-  const anyEnabled = docEnabled || (globalThis.qpyodideCellDetails || []).some(
-    (entry) => isInteractive(entry.options) &&
-      entry.options["local-storage"] === "true"
-  );
-
-  return {
-    // Whether ANY cell can use local storage at all this document. Individual
-    // cells still need cellEnabled() -- a cell's own `#| local-storage:`
-    // overrides this document default either way.
-    docEnabled,
-
-    // Identities are normally all resolved up front from the document's
-    // static cellDetails (see computeIdentities() above) -- but a "+ Code
-    // block" editor doesn't exist yet at that point (it's created later, in
-    // the browser). registerIdentity() lets qpyodide-cell-classes.js give
-    // such a dynamically-created cell an identity of its own on the fly, so
-    // it can use load()/save()/clear()/hasSaved() below exactly like any
-    // other cell. identityFor() looks up an already-resolved identity (e.g.
-    // a "+ Code block" button asking for its own parent cell's identity, to
-    // derive a stable "extra:<parent identity>" identity for itself).
-    registerIdentity(cellId, identity) {
-      identities[cellId] = identity;
-    },
-    identityFor(cellId) {
-      return identities[cellId] || null;
-    },
-
-    // Whether the settings gear needs an autosave section at all: only if
-    // the feature could possibly apply to some cell on this page (document
-    // default, or at least one cell opting in on its own even though the
-    // document default is off). Read by qpyodide-feedback.js to decide
-    // whether to build the gear even when AI feedback itself is disabled.
-    anyEnabled,
-
-    // The student's own device-wide preferences (see the file header
-    // comment and MANUAL_MODE_KEY above). Read/written by the checkboxes
-    // qpyodide-feedback.js builds into its settings panel.
-    isUserDisabled,
-    setUserDisabled,
-    isManualMode,
-    setManualMode,
-
-    // Cascading precedence, same pattern as `pdf-fallback`/`*-autoexec`,
-    // with the student's own device-wide preference as the final override.
-    // Re-reads isUserDisabled() fresh every call -- never cache this.
-    cellEnabled(options) {
-      if (isUserDisabled()) return false;
-      const override = options["local-storage"];
-      if (override === "true") return true;
-      if (override === "false") return false;
-      return docEnabled;
-    },
-
-    load(cellId) {
-      const identity = identities[cellId];
-      if (!identity) return null;
-      return safeGet(storageKey(identity));
-    },
-
-    save(cellId, code) {
-      const identity = identities[cellId];
-      if (!identity) return false;
-      return safeSet(storageKey(identity), code);
-    },
-
-    clear(cellId) {
-      const identity = identities[cellId];
-      if (!identity) return;
-      safeRemove(storageKey(identity));
-    },
-
-    hasSaved(cellId) {
-      const identity = identities[cellId];
-      if (!identity) return false;
-      return safeGet(storageKey(identity)) !== null;
-    },
-
-    // Wipes every locally-saved cell across every page on this site (not
-    // just the current page/epoch) -- the device-wide cleanup a student
-    // uses e.g. before handing back a shared/loaner machine. Never touches
-    // the two device-wide preference keys above (those are settings, not
-    // saved code). Returns the number of entries removed.
-    clearAll() {
-      let keys;
-      try {
-        keys = Object.keys(window.localStorage);
-      } catch (e) {
-        return 0;
+  function makeEntry(uid, description, unit = null, mount = null) {
+    let entry = entries.get(uid);
+    if (entry) { if (unit) entry.unit = unit; if (mount) entry.mount = mount; return entry; }
+    entry = {description, unit, mount, pending: null, saved: null, offer: null, restored: null};
+    entries.set(uid, entry);
+    if (!store()) return entry;
+    entry.handle = store().register({
+      component: "pyodide-interaktiv", id: description.id, source: description.source,
+      element: unit?.hostDiv || document.getElementById("qpyodide-insertion-location-" + uid.split(".")[0]),
+      save: description.save,
+      read() {
+        const code = entry.unit ? entry.unit.getCode() : entry.pending;
+        return code == null || code === description.original ? null : {code};
+      },
+      write(inputs) { if (typeof inputs?.code === "string") writeCode(entry, inputs.code); },
+      forget() { forget(entry); },
+      clear() {
+        forget(entry);
+        if (entry.unit && !entry.keepCode) {
+          entry.unit.feedbackHandle?.reset();
+          entry.unit.invalidateFeedback();
+          entry.unit.resetEditorToOriginal();
+          entry.unit.updateStorageStatus(false);
+        }
+      },
+      legacy: [legacy(entry)],
+      exportItem() {
+        if (!entry.unit) return null;
+        const unit = entry.unit, code = unit.getCode();
+        const parts = [{kind: "code", label: unit.options.label || description.id, text: code}];
+        if (unit.lastRunCode === code && unit.lastOutput) parts.push({kind: "output", label: text().copyOutput, text: unit.lastOutput});
+        if (unit.lastRunCode === code) {
+          (unit.lastPlotImages || []).forEach((png, i) => {
+            parts.push({kind: "image", label: text().figureLabel(i + 1), dataURL: "data:image/png;base64," + png});
+          });
+        }
+        return {title: unit.options["fig-cap"] || unit.options.label || description.id, parts};
       }
-      const toRemove = keys.filter((key) => key.indexOf(STORAGE_PREFIX) === 0);
-      toRemove.forEach(safeRemove);
-      return toRemove.length;
+    });
+    return entry;
+  }
+  function restore(entry) {
+    if (entry.didRestore || !entry.handle) return;
+    entry.didRestore = true;
+    entry.restored = entry.handle.restore();
+    if (entry.restored?.state === "restored") entry.saved = entry.restored.record?.inputs?.code ?? null;
+    if (["changed", "withdrawn"].includes(entry.restored?.state) && entry.mount) entry.mount();
+    offerOld(entry);
+  }
+  const api = {
+    docEnabled: true, anyEnabled: (globalThis.qpyodideCellDetails || []).some(cell => !["setup", "output"].includes(cell.options?.context)),
+    identityFor(uid) { return descriptors.get(String(uid))?.legacy || null; },
+    registerIdentity(uid, identity) {
+      const parent = descriptors.get(String(uid).split(".")[0]);
+      if (!parent) return;
+      descriptors.set(String(uid), {id: "extra:" + parent.id, source: parent.extraSource || parent.source, save: parent.extraSave !== false && parent.extraSave !== "false", original: "", legacy: identity});
     },
-
-    // Wipes only the entries saved for the current page (any epoch), for a
-    // reader who wants a fresh start here without touching their saved code
-    // on other pages of the same project. Matches on ":" + pathname + ":"
-    // rather than parsing the key apart -- storageKey() deliberately keeps
-    // epoch and identity unparsed since either can itself contain colons
-    // (see storageKey() above), but a URL pathname does not, so it can
-    // still be found as an exact colon-delimited segment. Returns the
-    // number of entries removed.
-    clearPage() {
-      let keys;
-      try {
-        keys = Object.keys(window.localStorage);
-      } catch (e) {
-        return 0;
+    attach(unit) {
+      const uid = String(unit.uid), description = descriptors.get(uid);
+      if (!description) return null;
+      const entry = makeEntry(uid, description, unit);
+      restore(entry);
+      if (entry.pending !== null) { const code = entry.pending; entry.pending = null; writeCode(entry, code); }
+      offerOld(entry);
+      unit.updateStorageStatus(entry.restored?.state === "restored");
+      return entry.handle;
+    },
+    attachOutput(cell, element) {
+      if (!store()) return null;
+      return store().register({
+        component: "pyodide-interaktiv", id: cell.options["ctm-store-id"], source: cell.options["ctm-store-source"],
+        element, save: false, read: () => null, write() {}, clear() {},
+        exportItem() {
+          const parts = [{kind: "output", label: text().copyOutput, text: cell.outputCodeDiv.innerText || cell.outputCodeDiv.textContent || ""}];
+          (cell.lastPlotImages || []).forEach((png, i) => parts.push({
+            kind: "image", label: text().figureLabel(i + 1), dataURL: "data:image/png;base64," + png
+          }));
+          return {title: cell.options["fig-cap"] || cell.options.label || cell.options["ctm-store-id"], parts};
+        }
+      });
+    },
+    prepareExtra(uid, mount) {
+      const description = descriptors.get(String(uid));
+      if (!description) return;
+      const entry = makeEntry(String(uid), description, null, mount);
+      restore(entry);
+    },
+    cellEnabled(options) { return !!store()?.enabled() && options?.["ctm-store-save"] !== false && options?.["ctm-store-save"] !== "false"; },
+    isUserDisabled() { return !store()?.enabled(); },
+    setUserDisabled(off) { store()?.setEnabled(!off); },
+    isManualMode: manual,
+    setManualMode(value) {
+      entries.forEach(entry => entry.handle?.cancel?.());
+      try { if (value) localStorage.setItem(MANUAL_KEY, "1"); else localStorage.removeItem(MANUAL_KEY); } catch (_) {}
+    },
+    changed(uid) {
+      const entry = entries.get(String(uid));
+      if (!entry || manual() || !store()?.enabled() || entry.description.save === false) return;
+      // Without an autosave acknowledgement, a later flush may replace or
+      // delete this value. Never keep an acknowledgement across that edit.
+      entry.saved = null;
+      entry.handle?.changed();
+    },
+    save(uid) {
+      const entry = entries.get(String(uid));
+      if (!entry || !store()?.enabled() || entry.description.save === false) return false;
+      if (entry.handle?.flush) {
+        const code = entry.unit?.getCode() ?? null;
+        const saved = entry.handle.flush();
+        if (saved) entry.saved = code === entry.description.original ? null : code;
+        return saved;
       }
-      const marker = ":" + location.pathname + ":";
-      const toRemove = keys.filter((key) =>
-        key.indexOf(STORAGE_PREFIX) === 0 && key.indexOf(marker) !== -1
-      );
-      toRemove.forEach(safeRemove);
-      return toRemove.length;
-    }
+      entry.handle?.changed(); return false;
+    },
+    load(uid) { return entries.get(String(uid))?.saved ?? null; },
+    hasSaved(uid) { return api.load(uid) !== null; },
+    clear(uid, {keepCode = false} = {}) {
+      const entry = entries.get(String(uid));
+      if (!entry) return;
+      entry.keepCode = keepCode;
+      try { entry.handle?.clear(); } finally { entry.keepCode = false; }
+    },
+    clearPage() { store()?.clearPage(); },
+    clearAll() { store()?.clearCourse(); }
   };
+  document.addEventListener("ctm:store-enabled", () => globalThis.qpyodideRefreshStorageUI?.());
+  return api;
 })();

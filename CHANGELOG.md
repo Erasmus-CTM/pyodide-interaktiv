@@ -1,5 +1,22 @@
 # Changes
 
+## 1.10.0 — Shared saved cells (phase B6)
+
+- Editable cells use ctm-libs' shared answer store. Saving is on by default;
+  `save: none` and per-cell `#| save: false` turn it off. Explicit legacy
+  `local-storage` options remain aliases. The shared page bar owns course
+  privacy and deletion; the Pyodide gear keeps manual-save mode.
+- Existing current-epoch code migrates lazily and is deleted only after a
+  successful shared write. Older epochs are ignored. Epoch-qualified new
+  IDs prevent a previous exam group's code being offered as an edited cell.
+- Restoring code never executes Python. Changed-source code is shown read-only.
+  Reset cancels pending saving and suppresses synthetic editor changes.
+  Extra code blocks use predeclared manifest slots and restore without running.
+- Copy code and Copy output always use the shared clipboard fallbacks.
+  Plot PNG downloads are secondary; page export registers current code,
+  text and PNGs without persisting output or Python state.
+- Requires ctm-libs API 3 and its generated shipped copy.
+
 ## 1.9.0 (working branch `feature/shared-feedback-integration`)
 
 pyodide-interaktiv runs on ctm-libs, the library of CTM Assessment

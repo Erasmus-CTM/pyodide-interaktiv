@@ -1,6 +1,6 @@
 -- ctm-libs: the internal library of CTM Assessment. This file returns the
 -- page's instance; every filter of the page (ctm-libs.lua, the components'
--- ctm-bootstrap.lua, the ai-feedback alias) gets the same one, because
+-- ctm-bootstrap.lua, the standalone forwarder) gets the same one, because
 -- filters share Lua globals. Modules (settings, locale, deps, runtime,
 -- feedback, policy, sections, source, ui) load on first use: ctm.<module>.
 --
@@ -37,7 +37,8 @@ end
 -- against its API or the component's opts.api). 2: the Python worker
 -- (CTMWorker, ctm.runtime.worker, ctm.runtime.indexURL), the pyodide settings
 -- section and settings.bool's digits option, the pyodide-interaktiv catalogue.
-local ctm = {dir = dir, version = manifestVersion(dir), api = 2}
+-- 3: saved-answer registration, manifest, progress and shared copy.
+local ctm = {dir = dir, version = manifestVersion(dir), api = 3}
 ctm.fail = fail
 
 -- Absolute path of a file of this installation.
@@ -56,19 +57,18 @@ setmetatable(ctm, {__index = function(self, name)
   return module
 end})
 
--- The passes of the ctm-libs filter (ctm-libs.lua and the ai-feedback alias):
+-- The passes of the ctm-libs filter (ctm-libs.lua and the standalone forwarder):
 -- settings, callouts, the page's interface (reveals, the switch, embeds, tab
 -- links: lua/ui.lua), then AI feedback's preparation, which sees reveals as
 -- the <details> scopes they become.
 function ctm.filters()
-  local ui = ctm.ui.passes()
-  return {
-    {Meta = function(meta) ctm.settings.load(meta); return ctm.feedback.bridge(meta) end},
+  local filters = {
+    {Meta = function(meta) ctm.settings.load(meta) end},
     {Callout = function(c) return ctm.feedback.markCallout(c) end},
-    ui[1],
-    ui[2],
-    {Pandoc = function(doc) return ctm.feedback.prepare(doc) end},
   }
+  for _, pass in ipairs(ctm.ui.passes()) do filters[#filters + 1] = pass end
+  filters[#filters + 1] = {Pandoc = function(doc) return ctm.feedback.prepare(doc) end}
+  return filters
 end
 
 _G.__ctmLibs = ctm
