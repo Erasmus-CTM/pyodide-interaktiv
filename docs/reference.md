@@ -776,3 +776,24 @@ would be too aggressive — bump the string by hand only when you actually
 want a reset.
 
 ---
+# Exam output and the shared Python worker
+
+Set `pyodide: {output-mode: exam, preload-packages: false}` for the exam IDE.
+Exam output contains text and PNG images. Returned HTML is literal text;
+JavaScript animations and canvas upgrades are disabled. Ordinary courses keep
+`output-mode: rich`. An explicitly requested canvas upgrade in that mode still
+uses a second, main-thread interpreter; STACK retains its own worker until P13
+phase 2.
+
+The existing Python windows now join `CTMWorker.page()`, the same interpreter
+used by standalone math-exercise and py-exercise on that page. A shared queue
+keeps each logical operation together. Stop uses a cooperative interrupt when
+cross-origin isolation is available; otherwise it terminates and restarts the
+worker, clearing Python variables. A program ignoring the interrupt also
+triggers that restart after the bounded grace period. Edited code stays in its
+editor and is never automatically rerun after Stop.
+
+Interactive `input()` requires a secure, cross-origin isolated page. Plain LAN
+HTTP supports Run and Stop and displays the input limitation. Oversized input
+stays editable with a validation message. Worker and plugin scripts are normal
+self-hosted files, so the exam build needs no blob worker URL.

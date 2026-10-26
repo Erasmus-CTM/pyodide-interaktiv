@@ -135,6 +135,24 @@ function resolveKey(section: string, key: string, accept: (value: unknown) => bo
   }
   return file;
 }
+// Nested variants options obey the same leaf-by-leaf precedence as section
+// keys. A page setting variants.target must not erase project approval.
+function variantApproval(): Entry | undefined {
+  let file: Entry | undefined, fromPage = false;
+  const leaf = (section: Record<string, unknown> | undefined, origin: string): unknown => {
+    if (!section || !Object.hasOwn(section, 'variants')) return undefined;
+    const group = section.variants;
+    if (!isMap(group)) { errors.push('ctm-assessment: variants must be a mapping (' + origin + ')'); return undefined; }
+    return Object.hasOwn(group, 'approval') ? (group as Record<string, unknown>).approval : undefined;
+  };
+  for (const level of levels) {
+    const value = leaf(level.sections['ctm-assessment'], level.origin);
+    if (value !== undefined) { file = {value, origin: level.origin}; fromPage = level.page; }
+  }
+  const meta = leaf(documentMeta['ctm-assessment'], 'document metadata');
+  if (!fromPage && meta !== undefined && !(file && same(file.value, meta))) return {value: meta, origin: 'document metadata'};
+  return file;
+}
 // Every key of a section at any level or in the merged metadata, with where it was set.
 function keysOf(section: string) {
   const found = new Map<string, string>();
@@ -172,13 +190,13 @@ function unknown(section: string, key: string, origin: string, known: string[]) 
 }
 
 // --- ai-feedback ------------------------------------------------------------
-const RUNTIME_KEYS = ['mode', 'storage', 'base-url', 'model', 'ui-language', 'feedback-language'];
-const SWITCH_KEYS = ['enabled'];
+const RUNTIME_KEYS = ['mode', 'storage', 'base-url', 'model', 'generator-model', 'ui-language', 'feedback-language'];
+const SWITCH_KEYS = ['enabled', 'similar'];
 // What a build without AI feedback does with exercises only AI feedback can
 // assess (lua/policy.lua validates the value).
 const BUILD_KEYS = ['without-ai'];
 // A2: policy-files adds up over the levels, policy selects (the nearest wins).
-const POLICY_KEYS = ['policy-files', 'policy'];
+const POLICY_KEYS = ['policy-files', 'policy', 'generation-policy'];
 const DEPRECATED: Record<string, string> = {
   'project-policy': 'use policy (the nearest setting wins)',
   'page-policy': "use policy, extending the project's policy where needed",
@@ -200,6 +218,11 @@ function feedbackSettings() {
     }
   }
   feedbackSwitch(out);
+  const similar = resolveKey('ai-feedback', 'similar');
+  if (similar && similar.value !== null) {
+    if (typeof similar.value !== 'boolean') errors.push('ai-feedback: similar must be true or false');
+    else out.similar = similar;
+  }
   for (const key of [...RUNTIME_KEYS, ...BUILD_KEYS]) {
     // Only a single value of the merged metadata counts (as before).
     const entry = resolveKey('ai-feedback', key, value => scalar(value) !== undefined);
@@ -325,7 +348,8 @@ function policies() {
     if (key) project = {value: meta[key], origin: 'document metadata'};
   }
   const page = seeded('page-policy').at(-1);
-  for (const [slot, entry] of [['projectPolicy', project], ['pagePolicy', page]] as [string, Entry | undefined][]) {
+  const generation = seeded('generation-policy').at(-1);
+  for (const [slot, entry] of [['projectPolicy', project], ['pagePolicy', page], ['generationPolicy', generation]] as [string, Entry | undefined][]) {
     if (!entry) continue;
     const value = selection(entry.value, entry.origin);
     if (value !== undefined && value !== null) config[slot] = value;
@@ -349,7 +373,7 @@ function policies() {
   if (!errors.length) {
     const feedback = (globalThis as any).AIFeedback;
     try {
-      for (const integration of ['plain-text', 'py-exercise', 'math-exercise', 'pyodide-interaktiv']) feedback.resolvePolicy(integration, 'en', {}, config);
+      for (const integration of ['plain-text', 'py-exercise', 'math-exercise', 'pyodide-interaktiv', 'stack']) feedback.resolvePolicy(integration, 'en', {}, config);
     } catch (error) {
       errors.push('ai-feedback: ' + (error as Error).message);
     }
@@ -370,7 +394,7 @@ const OWN_KEYS: Record<string, 'boolean' | 'string' | 'assets'> = {'tab-links': 
 const show = (value: unknown) => typeof value === 'object' ? JSON.stringify(value) : String(value);
 function sectionSettings(section: string) {
   const out: Record<string, Entry> = {};
-  const known = [...SHARED_KEYS, ...Object.keys(OWN_KEYS)];
+  const known = [...SHARED_KEYS, ...Object.keys(OWN_KEYS), 'variants'];
   for (const [key, origin] of keysOf(section)) {
     if (CREDENTIAL.test(key)) continue;
     if (section === 'ctm-assessment' && !known.includes(key)) {
@@ -394,6 +418,14 @@ function sectionSettings(section: string) {
       continue;
     }
     out[key] = entry;
+  }
+  if (section === 'ctm-assessment') {
+    const approval = variantApproval();
+    if (approval) {
+      if (!['required', 'optional'].includes(approval.value as string)) {
+        errors.push('ctm-assessment: variants.approval must be required or optional (' + approval.origin + ')');
+      } else out['variants.approval'] = approval;
+    }
   }
   return out;
 }

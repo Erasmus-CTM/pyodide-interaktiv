@@ -16,6 +16,7 @@ globalThis.qpyodideSetupPythonPackages = !(qpyodideInstallPythonPackagesList.ind
 // Automatically preload the HTTP shim and plotting packages? Defaults to true.
 // Explicit pyodide: packages entries still install when this is false.
 globalThis.qpyodidePreloadPackages = {{PRELOADPACKAGES}};
+globalThis.qpyodideExamOutput = {{EXAMOUTPUT}};
 
 // Display a startup message?
 globalThis.qpyodideShowStartupMessage = {{SHOWSTARTUPMESSAGE}};

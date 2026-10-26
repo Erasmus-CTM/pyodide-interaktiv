@@ -35,7 +35,10 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   const workers = [];
   class FakeWorker {
     constructor(url, options) { this.options = options; this.posted = []; this.terminated = false; workers.push(this); }
-    postMessage(message) { this.posted.push(message); }
+    postMessage(message) {
+      this.posted.push(message);
+      if (['beginOperation','endOperation'].includes(message.type)) queueMicrotask(() => this.reply({type:'result',id:message.id,value:true}));
+    }
     terminate() { this.terminated = true; }
     reply(data) { this.onmessage({data}); }
     // Answers the n-th command of a type (default: the last one).
@@ -50,7 +53,8 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   w.URL.revokeObjectURL = () => {};
   w.crossOriginIsolated = isolated;
   w.qpyodideCoiOutcome = coiOutcome;
-  w.MathExerciseRuntime = {whenInitialUIReady: () => initialUI};
+  w.eval(fs.readFileSync(path.join(libs, 'runtime/pyodide-runtime.js'), 'utf8'));
+  w.MathExerciseRuntime.whenInitialUIReady = () => initialUI;
   w.console = {log() {}, warn() {}, error() {}, info() {}};
   // The settings script (qpyodide-document-settings.js, rendered).
   Object.assign(w, {

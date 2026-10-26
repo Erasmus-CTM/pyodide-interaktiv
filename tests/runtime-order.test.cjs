@@ -36,11 +36,13 @@ test('actual page modes retain ordered runtime dependencies and inert pages stay
    const runtime=['ctm-runtime/pyodide-runtime.js','ctm-worker/pyodide-worker.js'];
    const locale=['ctm-locale/ctm-locale.js','ctm-locale/common.js'];
    const settings=['ctm-locale-ui/ui.js','ctm-layout/ctm-layout.js','ctm-layout/ctm-settings.js'];
-   // Ordinary/output cells register their worker before the shared store. A
+   // P13 registers common runtime messages before its worker. Ordinary/output
+   // cells still register that worker before the shared store. A
    // setup-only page has no store registration: document setup requests the
    // shared Settings shell first, then the runtime and worker. The old shipped
    // library has no shared Settings shell and retains its historical order.
-   const expected=sharedSettings ? (c.name==='setup-only'?[...locale,...settings,...runtime]:[...runtime,...locale,...settings]) : [...runtime,...locale];
+   const p13=fs.existsSync(path.join(dir,'_extensions/ctm-libs/runtime/pyodide-worker-core.js'));
+   const expected=sharedSettings ? (c.name==='setup-only'?[...locale,...settings,...runtime]:p13?[...locale,...runtime,...settings]:[...runtime,...locale,...settings]) : (p13?[...locale,...runtime]:[...runtime,...locale]);
    if(c.absent){
     assert.ok(!scripts.some(s=>runtime.includes(s.url)),c.name+' must not gain runtime/worker');
     assert.ok(!html.includes('globalThis.qpyodideCellDetails ='),c.name+' must not gain deferred cell configuration');

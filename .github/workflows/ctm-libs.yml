@@ -42,6 +42,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: node scripts/sync-worker-module.cjs --check
       # Test files render in parallel; their first `quarto run` (ctm-libs'
       # settings reader) and first HTML render fill Quarto's caches, which
       # parallel first uses race for. Fill them once.
