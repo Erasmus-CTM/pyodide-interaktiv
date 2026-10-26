@@ -646,21 +646,7 @@ class EditorUnit {
     const initialUI = new Promise((resolve, reject) => {
       require(["vs/editor/editor.main"], function () {
         try {
-        // Monaco 0.46 proactively writes promised clipboard data on every
-        // WebKit click/key. On insecure origins the API is absent; denied
-        // exam clipboard access also leaves cancelled promises unhandled.
-        // Keep Monaco's normal writeText/execCommand copy fallback instead.
-        // editor.main has already registered this bundled AMD module. Resolve
-        // it synchronously so the loader never requests a separate vendor file.
-        const clipboard = require("vs/platform/clipboard/browser/clipboardService")?.BrowserClipboardService?.prototype;
-        if (clipboard && !clipboard.__qpyodideGuarded && typeof clipboard.installWebKitWriteTextWorkaround === "function") {
-          const install = clipboard.installWebKitWriteTextWorkaround;
-          clipboard.installWebKitWriteTextWorkaround = function () {
-            if (!globalThis.qpyodideExamOutput && typeof globalThis.navigator?.clipboard?.write === "function" && typeof globalThis.ClipboardItem === "function")
-              return install.apply(this, arguments);
-          };
-          Object.defineProperty(clipboard, "__qpyodideGuarded", {value: true});
-        }
+        globalThis.MathExerciseRuntime.prepareMonacoClipboard();
         thiz.editor = monaco.editor.create(thiz.editorDiv, {
           // Restored, saved code (if any) takes the editor's initial value --
           // the original course code stays available via __qpyodideinitialCode

@@ -9,7 +9,7 @@ const method=source.slice(start,end).replace('  initMonaco() {','function initMo
 test('initial editors register their AMD work; user-added extra editors still initialize after the barrier closes',()=>{
   for(const initial of [true,false]) {
     const callbacks=[],tracked=[];
-    const root={qpyodideBuildingInitialUI:initial,MathExerciseRuntime:{trackInitialUI(p){if(!initial)throw new Error('barrier closed');tracked.push(p);}}};
+    const root={qpyodideBuildingInitialUI:initial,MathExerciseRuntime:{prepareMonacoClipboard(){},trackInitialUI(p){if(!initial)throw new Error('barrier closed');tracked.push(p);}}};
     const run=new Function('globalThis','require','qpyodideBuildingInitialUI','unit',method+';return initMonaco.call(unit);');
     run(root,(deps,callback)=>callbacks.push(callback),initial,{});
     assert.equal(callbacks.length,1,'the real AMD construction path remains active');
@@ -33,7 +33,7 @@ test('initial editor readiness rejects actual AMD, construction and layout failu
   for(const stage of ['amd','create','layout']) {
     const error=new Error(stage+' failed'),tracked=[];
     let callback,amdFailure;
-    const root={qpyodideBuildingInitialUI:true,MathExerciseRuntime:{trackInitialUI:p=>tracked.push(p)}};
+    const root={qpyodideBuildingInitialUI:true,MathExerciseRuntime:{prepareMonacoClipboard(){},trackInitialUI:p=>tracked.push(p)}};
     const editor={getModel:()=>({setEOL(){}}),createContextKey(){},onDidFocusEditorText(){},onDidChangeModelContent(){}};
     const monaco={editor:{create(){if(stage==='create')throw error;return editor;},EndOfLineSequence:{LF:0}}};
     const win={CTMLayout:{fitEditor(){throw error;}}};
@@ -42,20 +42,5 @@ test('initial editor readiness rejects actual AMD, construction and layout failu
     const result=assert.rejects(tracked[0],e=>e===error);
     if(stage==='amd')amdFailure(error);else assert.doesNotThrow(()=>callback());
     await result;
-  }
-});
-
-test('Monaco WebKit proactive clipboard writes are guarded before editor construction',async()=>{
-  for(const exam of [false,true])for(const available of [false,true]) {
-    let installs=0,callback;const sentinel=new Error('editor construction sentinel'),tracked=[];
-    class ClipboardService {installWebKitWriteTextWorkaround(){installs++;}}
-    const original=ClipboardService.prototype.installWebKitWriteTextWorkaround;
-    const root={qpyodideBuildingInitialUI:true,qpyodideExamOutput:exam,navigator:available?{clipboard:{write(){}}}:{},ClipboardItem:available?class {}:undefined,MathExerciseRuntime:{trackInitialUI:p=>tracked.push(p)}};
-    const monaco={editor:{create(){new ClipboardService().installWebKitWriteTextWorkaround();throw sentinel;}}};
-    const run=new Function('globalThis','require','qpyodideBuildingInitialUI','unit','monaco','window','qpyodideMonacoTheme',method+';return initMonaco.call(unit);');
-    run(root,(deps,ok)=>{if(typeof deps==='string'){assert.equal(deps,'vs/platform/clipboard/browser/clipboardService');return {BrowserClipboardService:ClipboardService};}assert.deepEqual(deps,['vs/editor/editor.main']);callback=ok;},true,{options:{}},monaco,{},()=> 'vs');
-    const result=assert.rejects(tracked[0],e=>e===sentinel);callback();await result;
-    assert.equal(installs,!exam&&available?1:0);
-    assert.notEqual(ClipboardService.prototype.installWebKitWriteTextWorkaround,original);
   }
 });
