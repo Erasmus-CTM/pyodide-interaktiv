@@ -930,13 +930,15 @@ class EditorUnit {
 
     // Streamed stdout/stderr: each line appears immediately in the terminal
     const onStream = (text, type) => {
-      const line = document.createElement("code");
-      line.className = type === "stderr"
+      const className = type === "stderr"
         ? "qpyodide-output-code-stderr"
         : "qpyodide-output-code-stdout";
-      line.textContent = text;
-      terminalDiv.appendChild(line);
-      terminalDiv.appendChild(document.createTextNode("\n"));
+      let line = terminalDiv.lastChild;
+      if (!line || line.nodeType !== 1 || line.className !== className) {
+        line = document.createElement("code"); line.className = className;
+        terminalDiv.appendChild(line);
+      }
+      line.appendChild(document.createTextNode(text + "\n"));
     };
 
     // Python input(): insert an input field inline into the terminal and
