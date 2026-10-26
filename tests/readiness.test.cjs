@@ -27,7 +27,7 @@ const CELLS = [
 
 // A page as qpyodide.lua writes it: the settings, ctm-libs' catalogue and
 // worker, then this extension's modules in their order.
-function page({cells = CELLS, isolated = false, preloadPackages = true, packages = [''], coiOutcome = 'unavailable', initialUI = Promise.resolve()} = {}) {
+function page({cells = CELLS, isolated = false, preloadPackages = true, packages = [''], coiOutcome = 'unavailable', initialUI = Promise.resolve(), stopAfter = 20} = {}) {
   const dom = new JSDOM('<header id="title-block-header"></header><main>'
     + cells.map(cell => `<div id="qpyodide-insertion-location-${cell.id}"></div>`).join('') + '</main>',
   {url: 'https://course.invalid/page.html', runScripts: 'outside-only'});
@@ -37,7 +37,7 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
     constructor(url, options) { this.options = options; this.posted = []; this.terminated = false; workers.push(this); }
     postMessage(message) {
       this.posted.push(message);
-      if (['beginOperation','endOperation'].includes(message.type)) queueMicrotask(() => this.reply({type:'result',id:message.id,value:true}));
+      if (['beginOperation','endOperation','prepareCell'].includes(message.type)) queueMicrotask(() => this.reply({type:'result',id:message.id,value:true}));
     }
     terminate() { this.terminated = true; }
     reply(data) { this.onmessage({data}); }
@@ -59,7 +59,7 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   // The settings script (qpyodide-document-settings.js, rendered).
   Object.assign(w, {
     qpyodideInstallPythonPackagesList: packages, qpyodideSetupPythonPackages: !packages.includes(''), qpyodideShowStartupMessage: true,
-    qpyodidePreloadPackages: preloadPackages,
+    qpyodidePreloadPackages: preloadPackages, qpyodideStopAfter: stopAfter,
     qpyodideCustomizedPyodideOptions: {indexURL: 'https://cdn.example/pyodide/v0.28.3/full/', env: {HOME: '/home/pyodide'}},
     qpyodideCanvasBackend: 'webagg', qpyodideLang: 'en', qpyodideCellDetails: cells,
     qpyodideFeedbackOptions: {enabled: false, storage: 'session', hints: true, uiLanguage: 'en'},
@@ -389,4 +389,19 @@ test('fatal worker error during package setup keeps Run disabled and reports eng
   p.workers[0].onerror({message:'worker crashed'});await tick();
   assert.equal(p.w.qpyodideCellsReady,false);assert.ok(p.runButtons().every(b=>b.disabled));
   assert.match(p.status(),/worker crashed/);assert.equal(p.workers.length,1);p.w.close();
+});
+
+
+test('IDE stop-after starts after preparation and keeps the immediate Stop control', async () => {
+  const p = page({cells:[{id:1,code:'while True: pass',options:{context:'interactive',autorun:false}}],preloadPackages:false,stopAfter:0.01});
+  const worker=p.workers[0];
+  await p.stage1(0);worker.reply({type:'setup',ok:true});await tick();
+  p.runButtons()[0].click();await tick();await tick();
+  assert.equal(p.runCells(worker).length,1);
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.match(p.w.document.querySelector('.qpyodide-output-code-area').textContent,/Python is still running/);
+  assert.match(p.runButtons()[0].textContent,/Stop/);
+  worker.answer('runCell',{entries:[],images:[]});await tick();await tick();
+  assert.doesNotMatch(p.w.document.querySelector('.qpyodide-output-code-area').textContent,/Python is still running/);
+  p.w.close();
 });

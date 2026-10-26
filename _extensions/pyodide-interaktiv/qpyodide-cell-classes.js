@@ -143,8 +143,12 @@ async function qpyodideExecutePython(code, wantPickle, handlers) {
     if (err && err.restarted) throw err;
   }
   const result = await MathExerciseRuntime.transaction(pyodide,
-    () => pyodide.runCell(code, globalThis.qpyodideExamOutput ? false : wantPickle,
-      globalThis.qpyodideExamOutput === true), handlers);
+    async () => {
+      await pyodide.prepareCell(code);
+      handlers?.onRunning?.();
+      return pyodide.runCell(code, globalThis.qpyodideExamOutput ? false : wantPickle,
+        globalThis.qpyodideExamOutput === true);
+    }, handlers);
   result.text = result.entries.map((entry) => entry.message).join("\n");
   return result;
 }
@@ -980,6 +984,16 @@ class EditorUnit {
       });
     };
 
+    const common = CTMLocales.table("common", globalThis.qpyodideLang || "en");
+    let cancelSlow = () => {}, slowNote = null;
+    const onRunning = () => {
+      cancelSlow = MathExerciseRuntime.whenSlow((globalThis.qpyodideStopAfter || 20) * 1000, () => {
+        slowNote = document.createElement("div");
+        slowNote.setAttribute("role", "status");
+        slowNote.textContent = common.pythonSlow;
+        terminalDiv.appendChild(slowNote);
+      }, {runtime: proxy});
+    };
     // Turn the Run button into a Stop button
     const runButtonHtml = this.runButton.innerHTML;
     this.runButton.innerHTML = QP_L.stopLabel;
@@ -995,14 +1009,14 @@ class EditorUnit {
         aborted.textContent = QP_L.aborted;
         row.replaceChildren(aborted);
       });
-      MathExerciseRuntime.stop(QP_L.abortedRestart);
+      MathExerciseRuntime.stop(common.stopped);
 
     };
 
     let text = "";
     try {
       const result = await qpyodideExecutePython(
-        code, globalThis.qpyodideCanvasWanted?.(this.options), {onStream, onInputRequired}
+        code, globalThis.qpyodideCanvasWanted?.(this.options), {onStream, onInputRequired, onRunning}
       );
       text = result.text;
       if (outputRevision !== this.outputRevision) return text;
@@ -1026,13 +1040,14 @@ class EditorUnit {
       // Hard abort (worker restart) or worker crash
       evidence = [];
       if (outputRevision !== this.outputRevision) return '';
-      text = String((err && err.message) || err);
+      text = err?.restarted ? QP_L.abortedRestart : err?.cancelled ? common.stopped : String((err && err.message) || err);
       terminalDiv.querySelectorAll(".qpyodide-input-row").forEach((r) => r.remove());
       const errCode = document.createElement("code");
       errCode.className = "qpyodide-output-code-stderr";
       errCode.textContent = text;
       terminalDiv.appendChild(errCode);
     } finally {
+      cancelSlow(); slowNote?.remove();
       proxy.onStream = null;
       proxy.onInputRequired = null;
       proxy.clearInterrupt();

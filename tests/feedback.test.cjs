@@ -21,7 +21,7 @@ function page({language='en', storage='session', hints=true, enabled=true, autos
   if(autosave){w.qpyodideLocalStorageOptions={enabled:true,epoch:''};w.qpyodideCellDetails=[{id:'1',code:'print(80)',options:{label:'one'}}];w.eval(fs.readFileSync(path.join(ext,'qpyodide-storage.js'),'utf8'));}
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-feedback.js'),'utf8'));
   let runs = 0, execute = async () => ({entries:[{type:'stdout',message:'80'}], images:[]});
-  const proxy = {runCell: async (...args) => {runs++; return execute(...args);}, clearInterrupt(){}};
+  const proxy = {prepareCell:async()=>{},runCell: async (...args) => {runs++; return execute(...args);}, clearInterrupt(){}};
   w.qpyodideReady = Promise.resolve(proxy); w.mainPyodide = proxy;
   w.qpyodideInputAvailable = () => false;
   w.eval(fs.readFileSync(path.join(ext,'qpyodide-cell-classes.js'),'utf8')+'\nglobalThis.Unit=EditorUnit;');

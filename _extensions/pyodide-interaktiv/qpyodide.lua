@@ -125,6 +125,7 @@ local homeDir = "/home/pyodide"
 local showStartUpMessage = "true"
 local preloadPackages = "true"
 local examOutput = "false"
+local stopAfter = 20
 
 -- Define an empty string if no packages need to be installed.
 local installPythonPackagesList = "''"
@@ -560,6 +561,7 @@ local function setPyodideOptionsFromSettings(meta)
   homeDir = text("home-dir") or homeDir
   showStartUpMessage = tostring(onOff("show-startup-message", true))
   preloadPackages = tostring(onOff("preload-packages", true))
+  stopAfter = ctm.runtime.stopAfter("pyodide")
   examOutput = tostring(S.choice("pyodide", "output-mode", {"rich", "exam"}, {default = "rich"}) == "exam")
   -- Feedback is on unless pyodide: feedback: false, and only in builds with
   -- AI feedback (P22, asked directly: no dependence on the filter order). An
@@ -644,6 +646,7 @@ local function initializationPyodide()
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["PRELOADPACKAGES"] = preloadPackages,
     ["EXAMOUTPUT"] = examOutput,
+    ["STOPAFTER"] = tostring(stopAfter),
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
     ["QPYODIDECELLDETAILS"] = cellDetails,
     ["FEEDBACKENABLED"] = feedbackEnabled,

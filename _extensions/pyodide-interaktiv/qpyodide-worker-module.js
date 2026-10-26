@@ -265,6 +265,11 @@ registerPlugin(function (api) {
   return {
     stage1: INPUT_HOOK,
     commands: {
+      prepareCell: async msg => {
+        const pyodide = api.pyodide();
+        await pyodide.loadPackagesFromImports(msg.code);
+        await ensurePlotSetup(pyodide);
+      },
       runCell: (msg) => runCell(msg.code, msg.wantPickle, msg.examOutput)
     }
   };

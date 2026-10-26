@@ -121,8 +121,9 @@ function qpyodideStartWorker() {
   pluginURLs,
   plugin: pluginURLs.length ? undefined : QPYODIDE_WORKER_PLUGIN,
   examOutput: globalThis.qpyodideExamOutput === true,
+  stopAfter: globalThis.qpyodideStopAfter || 20,
   showStatus: globalThis.qpyodideShowStartupMessage !== false,
-  commands: { runCell: ["code", "wantPickle", "examOutput"] },
+  commands: { prepareCell: ["code"], runCell: ["code", "wantPickle", "examOutput"] },
   // Translated status texts for the worker (it doesn't know QP_L)
   messages: {
     loading:       QP_L.workerLoading,
