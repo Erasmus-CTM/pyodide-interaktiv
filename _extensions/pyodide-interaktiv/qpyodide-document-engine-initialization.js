@@ -131,6 +131,11 @@ function qpyodideStartWorker() {
     extraPackages: QP_L.workerExtraPackages
   },
   onStatus: (text) => qpyodideUpdateStatusHeaderSpinner(text),
+  onFailure: (error) => {
+    globalThis.qpyodideCellsReady = false;
+    qpyodideSetInteractiveButtonState(QP_L.runLoading, false);
+    qpyodideUpdateStatusHeader(QP_L.engineFailed(error.message));
+  },
   onRestart: (again) => {
     qpyodideFollowWorker(again, true).catch((err) => console.error("qpyodide: restart failed", err));
   },
