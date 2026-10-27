@@ -2,6 +2,6 @@
  "comment": "Commits CI uses. ctm-assessment: the umbrella's tools/ci/review-dependencies.py, which reads a head commit's CTM-Review-Refs trailer (other commits for review). The shipped ctm-libs records its own commit in .github/ctm-libs-source.json.",
  "ctm-assessment": {
   "repository": "Erasmus-CTM/ctm-assessment",
-  "commit": "f4be5a6c96fa2eabc5ca7daf71dc438575b2a726"
+  "commit": "d854fc613b2b1d2b59fb2925ec5db7b65a985865"
  }
 }
