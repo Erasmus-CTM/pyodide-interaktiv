@@ -75,7 +75,7 @@ registerPlugin(function (api) {
     "    # If an animation is attached to the figure, it becomes a JS player.",
     "    # If that fails, the figure falls back to the normal PNG path - the",
     "    # same fallback pattern as for the pickles.",
-    "    for ani in _qpyodide_animations:",
+    "    for ani in ([] if globals().get(\"_qpyodide_exam_output\", False) else _qpyodide_animations):",
     "        if getattr(ani, '_fig', None) is not fig:",
     "            continue",
     "        try:",
@@ -85,6 +85,8 @@ registerPlugin(function (api) {
     "        except Exception as exc:",
     "            _qpyodide_anim_errors.append(type(exc).__name__ + ': ' + str(exc))",
     "            break",
+    "    if len(_qpyodide_shown) >= 16:",
+    "        raise RuntimeError('Plot output exceeds 16 figures')",
     "    _qpyodide_shown.append(fig)",
     "    plt.close(fig)",
     "",
@@ -108,9 +110,16 @@ registerPlugin(function (api) {
     "    # savefig attaches a renderer to the figure that shouldn't be",
     "    # pickled along with it.",
     "    import base64, io, pickle, warnings",
+    "    class BoundedPNG(io.BytesIO):",
+    "        def write(self, data):",
+    "            if self.tell() + len(data) > 8388608:",
+    "                raise RuntimeError('Plot output exceeds the image budget')",
+    "            return super().write(data)",
     "    animations  = list(_qpyodide_shown_anims)",
     "    anim_errors = list(_qpyodide_anim_errors)",
     "    images, pickles, errors = [], [], []",
+    "    if len(_qpyodide_shown) > 16:",
+    "        raise RuntimeError('Plot output exceeds 16 figures')",
     "    for fig in _qpyodide_shown:",
     "        if want_pickle:",
     "            try:",
@@ -124,8 +133,10 @@ registerPlugin(function (api) {
     "            except Exception as exc:",
     "                pickles.append('')",
     "                errors.append(type(exc).__name__ + ': ' + str(exc))",
-    "        buf = io.BytesIO()",
+    "        buf = BoundedPNG()",
     "        fig.savefig(buf, format='png', bbox_inches='tight')",
+    "        if buf.tell() > 8388608 or sum(map(len, images)) + buf.tell() * 4 // 3 > 16777216:",
+    "            raise RuntimeError('Plot output exceeds the image budget')",
     "        images.append(base64.b64encode(buf.getvalue()).decode('ascii'))",
     "    _qpyodide_shown.clear()",
     "    _qpyodide_shown_anims.clear()",
@@ -195,13 +206,14 @@ registerPlugin(function (api) {
   // matplotlib figures as PNG (base64). With wantPickle, the PNG figures
   // additionally come along as pickle, so a second Pyodide instance on the
   // main thread can redraw them interactively.
-  async function runCell(code, wantPickle) {
+  async function runCell(code, wantPickle, examOutput) {
     api.capture.start();
     const pyodide = api.pyodide();
     let resultValue;
     try {
       await pyodide.loadPackagesFromImports(code);
       await ensurePlotSetup(pyodide);
+      await pyodide.globals.set('_qpyodide_exam_output', !!examOutput);
       resultValue = await pyodide.runPythonAsync(code);
     } catch (err) {
       // An uncaught Python exception never goes through the stdout/stderr
@@ -213,7 +225,7 @@ registerPlugin(function (api) {
       // would silently show nothing at all in the terminal.
       const message = String(err);
       api.capture.push({ message: message, type: "stderr" });
-      self.postMessage({ type: "streamStderr", text: message });
+
     }
 
     let html = null;
@@ -222,7 +234,7 @@ registerPlugin(function (api) {
       if (typeof resultValue === "object" && typeof resultValue.destroy === "function") {
         resultValue.destroy();
       }
-      if (looksLikeHtml(asText)) {
+      if (!examOutput && looksLikeHtml(asText)) {
         html = asText;
       } else {
         api.capture.push({ message: asText, type: "stdout" });
@@ -237,7 +249,7 @@ registerPlugin(function (api) {
     // Without the plot setup there is nothing to collect (N4).
     if (plotSetup === true) try {
       const collect = pyodide.globals.get("_qpyodide_collect_figures");
-      const proxy = collect(!!wantPickle);
+      const proxy = collect(!examOutput && !!wantPickle);
       const collected = proxy.toJs();
       images      = collected[0];
       pickles     = collected[1];
@@ -264,7 +276,12 @@ registerPlugin(function (api) {
   return {
     stage1: INPUT_HOOK,
     commands: {
-      runCell: (msg) => runCell(msg.code, msg.wantPickle)
+      prepareCell: async msg => {
+        const pyodide = api.pyodide();
+        await pyodide.loadPackagesFromImports(msg.code);
+        await ensurePlotSetup(pyodide);
+      },
+      runCell: (msg) => runCell(msg.code, msg.wantPickle, msg.examOutput)
     }
   };
 });

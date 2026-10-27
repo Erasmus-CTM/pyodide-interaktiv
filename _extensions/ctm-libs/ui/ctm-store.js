@@ -4,6 +4,7 @@
   if (window.CTMStore) return;
   var config, course, page, prefix, pagePrefix, prefsKey, seedKey, clearKey, clearChannel, prefs;
   var entries = [], memory = {localStorage: {}, sessionStorage: {}}, dirty = {localStorage: {}, sessionStorage: {}}, failed = {}, messages = {};
+  var savedHere = false, compactNotice;
   var LIMIT = 64 * 1024, delay = 250;
   function emit(type, detail) { document.dispatchEvent(new CustomEvent(type, {detail: detail})); }
   function text(key, fallback) { return config && config.messages && config.messages[key] || fallback; }
@@ -12,6 +13,7 @@
     messages[key] = text(key, fallback);
     var node = document.querySelector('.ctm-save-status');
     if (node) node.textContent = messages[key];
+    if (compactNotice) compactNotice.textContent = messages[key];
     emit('ctm:store-message', {key: key, text: messages[key]});
   }
   // Keep a memory mirror. A failed durable write must never delete legacy data.
@@ -139,7 +141,10 @@
         if (entry.id !== command.id || !componentMatches({component: entry.options.component})) return;
         if (ambiguous && command.runtimeId && entry.runtimeExplicit && entry.runtimeId !== command.runtimeId) return;
       }
-      if (entry.id) { delete memory.localStorage[key(entry.id)]; delete dirty.localStorage[key(entry.id)]; }
+      if (entry.id) {
+        delete memory.localStorage[key(entry.id)]; delete dirty.localStorage[key(entry.id)];
+        storage('sessionStorage', 'remove', key(entry.id));
+      }
       forget(entry);
       if (command.reset === true && entry.options.clear) entry.options.clear();
       if (command.scope === 'exercise') emit('ctm:store-clear', {
@@ -161,6 +166,7 @@
   }
   function clearPage() {
     configure(); var durable = erase(pagePrefix); resetEntries();
+    storage('sessionStorage', 'keys').forEach(function (name) { if (name.startsWith(pagePrefix)) storage('sessionStorage', 'remove', name); });
     if (!sendClear('page', undefined, undefined, undefined, true)) durable = false;
     if (!durable) clearFailure();
     emit('ctm:store-clear', {course: course, page: page, durable: durable});
@@ -171,7 +177,7 @@
     storage('localStorage', 'keys').forEach(function (name) {
       if (name.startsWith(prefix) && name !== prefsKey && name !== prefix + '~mode' && !remove(name)) durable = false;
     });
-    storage('sessionStorage', 'remove', seedKey);
+    storage('sessionStorage', 'keys').forEach(function (name) { if (name.startsWith(prefix)) storage('sessionStorage', 'remove', name); });
     if (reset) resetEntries();
     else entries.forEach(forget);
     if (!sendClear('course', undefined, undefined, undefined, reset)) durable = false;
@@ -200,6 +206,7 @@
     updateBar(); emit('ctm:store-enabled', {enabled: value}); return value;
   }
   function current(entry) { return entry.options.variant ? entry.options.variant() : null; }
+  function proposal(entry) { return entry.options.allowProposals === true && entry.options.proposal ? entry.options.proposal() : null; }
   function writable(entry) {
     if (!enabled() || entry.options.save === false || entry.duplicate || !entry.id) return false;
     return !(config.exercises || []).some(function (item) { return item.id === entry.id && item.save === false; });
@@ -208,13 +215,18 @@
     if (!writable(entry)) return false;
     var name = key(entry.id), previous = parse(get(name));
     if (future(previous)) return false;
-    if (inputs === null || inputs === undefined) { entry.lastResult = null; return remove(name); }
+    var variant = current(entry), pending = proposal(entry);
+    if (inputs === null || inputs === undefined) {
+      entry.lastResult = null;
+      if (!variant && !pending) return remove(name);
+      inputs = {}; // An untouched answer still retains its selected variant.
+    }
     var record = {v: 1, component: entry.options.component, saved: new Date().toISOString(), inputs: inputs};
-    var variant = current(entry);
-    if (variant) {
-      record.variant = {n: variant.n, id: variant.id, hash: variant.hash};
-      record.seen = Array.from(new Set([].concat(previous && previous.seen || [], entry.options.seen ? entry.options.seen() : [],
-        variant.n === undefined ? [] : [variant.n])));
+    if (variant || pending) {
+      record.variant = variant ? {n: variant.n, id: variant.id, hash: variant.hash} : null;
+      if (pending && !variant) record.proposal = {id: pending.id, hash: pending.hash};
+      record.seen = Array.from(new Set([].concat(entry.options.seen ? entry.options.seen() : previous && previous.seen || [],
+        variant ? [variant.n] : ['proposal:' + pending.id])));
     } else record.source = entry.options.source;
     if (entry.lastResult) record.result = entry.lastResult;
     var serialized;
@@ -223,7 +235,9 @@
       announce('recordTooLarge', 'This answer is too large to save. Copy it before leaving the page.');
       return false;
     }
-    return put(name, serialized);
+    var persisted = put(name, serialized);
+    if (persisted) { savedHere = true; updateBar(); }
+    return persisted;
   }
   function valid(record, component) {
     return record && record.v === 1 && record.component === component && record.inputs &&
@@ -262,24 +276,39 @@
       if (!valid(record, options.component)) return {state: 'empty'};
       entry.lastResult = record.result || null; entry.lastChecked = entry.lastResult;
       var state = 'restored', selected = null;
-      if (record.variant) {
+      if (record.variant || record.proposal) {
+        var oldIdentity = record.variant || record.proposal;
         var variants = options.variants ? options.variants() : [current(entry)].filter(Boolean);
-        selected = variants.find(function (variant) { return variant.hash && variant.hash === record.variant.hash; });
+        var sameHash = variants.filter(function (variant) { return variant.hash && variant.hash === oldIdentity.hash; });
+        selected = sameHash.find(function (variant) { return Number.isSafeInteger(oldIdentity.n) && variant.n === oldIdentity.n; }) ||
+          sameHash.find(function (variant) { return variant.id === oldIdentity.id; }) ||
+          (sameHash.length === 1 ? sameHash[0] : null);
         if (!selected) {
-          selected = variants.find(function (variant) { return record.variant.n !== undefined && variant.n === record.variant.n; }) ||
-            variants.find(function (variant) { return record.variant.id !== undefined && variant.id === record.variant.id; });
+          selected = variants.find(function (variant) { return Number.isSafeInteger(oldIdentity.n) && variant.n === oldIdentity.n; }) ||
+            variants.find(function (variant) { return oldIdentity.id !== undefined && variant.id === oldIdentity.id; });
           state = selected ? 'changed' : 'withdrawn';
         }
       } else if (current(entry) || record.source !== options.source) state = 'changed';
       entry.outdated = state !== 'restored';
       if (entry.outdated) entry.lastResult = null;
-      var outcome = {state: state, record: clone(record), variant: selected, outdated: entry.outdated};
+      var outcome = {state: state, record: clone(record), variant: selected || null, outdated: entry.outdated};
       if (state === 'restored') options.write(clone(record.inputs), outcome);
-      emit('ctm:store-restore', {component: options.component, id: entry.id, runtimeId: entry.runtimeId, state: state, result: record.result || null, outdated: outcome.outdated});
+      emit('ctm:store-restore', {component: options.component, id: entry.id, runtimeId: entry.runtimeId, state: state, answered: options.hasAnswer ? !!options.hasAnswer(record.inputs) : hasAnswer(record.inputs), result: record.result || null, outdated: outcome.outdated});
       return outcome;
     }
-    function flush() { cancel(entry); return save(entry, options.read()); }
-    function changed() { cancel(entry); entry.lastResult = null; entry.outdated = !!entry.lastChecked; if (writable(entry)) entry.timer = setTimeout(flush, delay); }
+    function flush(flushOptions) {
+      var answerEditPending = entry.timer !== null && entry.timer !== undefined;
+      cancel(entry);
+      var inputs = options.read();
+      if (answerEditPending || !flushOptions || flushOptions.notify !== false) emit('ctm:answer-change', {component: options.component, id: entry.id, runtimeId: entry.runtimeId, answered: options.hasAnswer ? !!options.hasAnswer(inputs) : hasAnswer(inputs)});
+      return save(entry, inputs);
+    }
+    function changed() {
+      cancel(entry); entry.lastResult = null; entry.outdated = !!entry.lastChecked;
+      savedHere = false; updateBar();
+      emit('ctm:answer-change', {component: options.component, id: entry.id, runtimeId: entry.runtimeId, answered: true});
+      entry.timer = setTimeout(flush, delay);
+    }
     function result(detail) {
       detail = detail || {};
       if (!['correct', 'partial', 'wrong', 'invalid'].includes(detail.status) ||
@@ -293,10 +322,19 @@
         entry.lastChecked = entry.lastResult;
       }
       save(entry, options.read());
-      emit('ctm:result', {component: options.component, id: entry.id, runtimeId: entry.runtimeId, score: detail.score, status: detail.status, variant: detail.variant || current(entry)});
+      var selected = detail.variant || current(entry);
+      var event = {component: options.component, id: entry.id, runtimeId: entry.runtimeId, score: detail.score, status: detail.status, variant: selected};
+      if (options.numberedVariantResults === true) {
+        var identity = selected && Number.isSafeInteger(selected.n) && selected.n > 0 &&
+          typeof selected.id === 'string' && selected.id && typeof selected.hash === 'string' && selected.hash ? selected : null;
+        event.variant = identity ? identity.n : null;
+        event.variantIdentity = identity ? {n: identity.n, id: identity.id, hash: identity.hash} : null;
+      }
+      emit('ctm:result', event);
     }
     function clear() {
       var durable = entry.id ? remove(key(entry.id)) : true;
+      if (entry.id) storage('sessionStorage', 'remove', key(entry.id));
       forget(entry);
       if (options.clear) options.clear();
       if (entry.id && !sendClear('exercise', entry.id, entry.runtimeExplicit ? entry.runtimeId : undefined, options.component, true)) durable = false;
@@ -304,8 +342,50 @@
       emit('ctm:store-clear', {course: course, page: page, id: entry.id, runtimeId: entry.runtimeId, durable: durable});
       return durable;
     }
+    // Choice-only state shares the P17 exercise key, even before any answer.
+    // Saving off keeps only identity/seen in session storage, never answers.
+    function restoreChoice() {
+      if (!entry.id || entry.duplicate) return null;
+      var kind = writable(entry) ? 'localStorage' : 'sessionStorage';
+      var record = parse(storage(kind, 'get', key(entry.id)));
+      return valid(record, options.component) && (record.variant || record.proposal) ? clone(record) : null;
+    }
+    function choice(state) {
+      if (!entry.id || entry.duplicate) return false;
+      var variant = state && state.variant, pending = state && state.proposal;
+      var isProposal = options.allowProposals === true && state && state.variant === null && pending;
+      var chosen = variant || (isProposal && pending);
+      if (!chosen || (!isProposal && (!Number.isSafeInteger(variant.n) || variant.n < 1)) ||
+          typeof chosen.id !== 'string' || !chosen.id || typeof chosen.hash !== 'string' || !chosen.hash ||
+          !Array.isArray(state.seen) || state.seen.some(function (n) {
+            return !(Number.isSafeInteger(n) && n > 0) && !(options.allowProposals === true && typeof n === 'string' && /^proposal:.+/.test(n));
+          })) {
+        throw new TypeError('Variant choice needs a positive identity and seen numbers.');
+      }
+      var kind = writable(entry) ? 'localStorage' : 'sessionStorage', name = key(entry.id);
+      var previous = parse(storage(kind, 'get', name));
+      if (future(previous)) return false;
+      var oldIdentity = previous && (previous.variant || previous.proposal);
+      var matchingContent = options.variants ? options.variants().filter(function (item) { return item.hash === chosen.hash; }) : [];
+      var unambiguousContent = matchingContent.length === 1 &&
+        (matchingContent[0].n === chosen.n || matchingContent[0].id === chosen.id);
+      // Equal mathematical content can belong to distinct note identities.
+      // A deliberate switch must discard its old answer/result cache too.
+      var sameIdentity = oldIdentity && oldIdentity.hash === chosen.hash &&
+        (unambiguousContent || ((Number.isSafeInteger(oldIdentity.n) && Number.isSafeInteger(chosen.n)) ? oldIdentity.n === chosen.n : oldIdentity.id === chosen.id));
+      if (!sameIdentity) forget(entry);
+      var record = {v: 1, component: options.component, saved: new Date().toISOString(), inputs: {},
+        variant: variant ? {n: variant.n, id: variant.id, hash: variant.hash} : null,
+        seen: Array.from(new Set(state.seen.concat(variant ? variant.n : 'proposal:' + pending.id)))};
+      if (isProposal) record.proposal = {id: pending.id, hash: pending.hash};
+      if (kind === 'localStorage' && valid(previous, options.component) && sameIdentity) {
+        record.inputs = previous.inputs;
+        if (previous.result) record.result = previous.result;
+      }
+      return storage(kind, 'set', name, JSON.stringify(record));
+    }
     entry.flush = flush;
-    return {restore: restore, changed: changed, result: result, clear: clear, flush: flush, cancel: function () { cancel(entry); }};
+    return {restore: restore, restoreChoice: restoreChoice, choice: choice, changed: changed, result: result, clear: clear, flush: flush, cancel: function () { cancel(entry); }};
   }
   function cleanup() {
     if (!enabled() || !Array.isArray(config.exercises)) return;
@@ -314,12 +394,21 @@
       if (name.startsWith(pagePrefix) && !live.includes(name) && !future(parse(get(name)))) remove(name);
     });
   }
+  function hasAnswer(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'object') return Object.keys(value).some(function (key) { return hasAnswer(value[key]); });
+    return true;
+  }
   function updateBar() {
     var button = document.querySelector('[data-ctm-save-toggle]');
     if (button) button.textContent = enabled() ? text('saveOff', 'Do not save on this device') : text('saveOn', 'Save again');
     var notice = document.querySelector('.ctm-save-notice');
     if (notice) notice.textContent = config.save === false ? text('savingDisabled', 'Saving is off for this page.') :
       enabled() ? text('savingNotice', 'Your answers are saved only in this browser.') : text('savingOffNotice', 'Saving is off on this device for this course.');
+    if (compactNotice) compactNotice.textContent = failed.localStorage ? text('storageUnavailable', 'Saving is unavailable. Your answers are kept in memory for this page only.') :
+      config.save === false || !enabled() ? text('notSaving', 'Answers aren’t being saved') :
+      savedHere && !entries.some(function (entry) { return entry.timer; }) ? text('savedLocal', 'Saved in this browser') : text('savingLocal', 'Saving in this browser');
   }
   function start() {
     configure(); cleanup(); updateBar();
@@ -327,11 +416,19 @@
     if (status && keys.length) status.textContent = messages[keys[keys.length - 1]];
     var bar = document.querySelector('.ctm-save-bar');
     if (bar) {
+      if (window.CTMSettings) {
+        window.CTMSettings.register('answers', text('answersStorage', 'Answers & storage'), bar);
+        compactNotice = document.createElement('button'); compactNotice.type = 'button';
+        compactNotice.className = 'ctm-save-summary';
+        compactNotice.setAttribute('aria-haspopup', 'dialog'); compactNotice.setAttribute('aria-controls', 'ctm-settings');
+        compactNotice.onclick = function () { window.CTMSettings.open('answers'); };
+        window.CTMSettings.summary(compactNotice); updateBar();
+      }
       bar.hidden = false;
       bar.addEventListener('click', function (event) {
         var button = event.target.closest('button');
         if (!button) return;
-        if (button.hasAttribute('data-ctm-clear-page')) clearPage();
+        if (button.hasAttribute('data-ctm-clear-page') && window.confirm(text('confirmClearPage', 'Delete all saved answers on this page?'))) clearPage();
         if (button.hasAttribute('data-ctm-clear-course') && window.confirm(text('confirmClearCourse', 'Delete all your saved answers in this course?'))) clearCourse();
         if (button.hasAttribute('data-ctm-save-toggle') && (!enabled() ||
           window.confirm(text('confirmSaveOff', 'This deletes all saved answers in this course and stops saving.')))) setEnabled(!enabled());

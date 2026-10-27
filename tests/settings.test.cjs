@@ -30,6 +30,18 @@ function render(dir, args = []) {
   return { ...r, stderr: (r.stderr || '').replace(/\x1b\[[0-9;]*m/g, '') };
 }
 const yml = (pages, extra = '') => 'project:\n  type: default\n  render: [' + pages.join(', ') + ']\nfilters: [Erasmus-CTM/pyodide-interaktiv]\n' + extra;
+
+test('exam output and shared stop-after reach the IDE without changing preload policy', {skip}, () => withProject({
+  '_quarto.yml': yml(['page.qmd'], 'ctm-assessment:\n  stop-after: 0.1\npyodide:\n  output-mode: exam\n  preload-packages: false\n'),
+  'page.qmd': '---\ntitle: Exam\n---\n' + CELL,
+}, dir => {
+  const r = render(dir);
+  assert.equal(r.status,0,r.stderr);
+  const s = settings(dir,'page.qmd');
+  assert.equal(s.qpyodideExamOutput,true);
+  assert.equal(s.qpyodideStopAfter,0.1);
+  assert.equal(s.qpyodidePreloadPackages,false);
+}));
 // The page's settings script, evaluated: the globals it defines.
 function settings(dir, page) {
   const html = fs.readFileSync(path.join(dir, page.replace(/\.qmd$/, '.html')), 'utf8');

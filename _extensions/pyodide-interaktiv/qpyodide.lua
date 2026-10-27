@@ -9,6 +9,9 @@ local feedback = nil
 local INSTALL = "quarto add https://erasmus-ctm.github.io/ctm-assessment/ctm-assessment.tar.gz"
 local STANDALONE = "quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration"
 local function requireAssets()
+  if type(ctm.runtime.page) ~= "function" then
+    ctm.fail("P13 requires an updated CTM Assessment page-worker runtime. Reinstall CTM Assessment: " .. INSTALL)
+  end
   local assets = ctm.assets
   if type(assets) ~= "table" or type(assets.use) ~= "function"
       or type(assets.mode) ~= "function" or type(assets.url) ~= "function" then
@@ -122,6 +125,8 @@ local homeDir = "/home/pyodide"
 -- Define whether a startup status message should be displayed
 local showStartUpMessage = "true"
 local preloadPackages = "true"
+local examOutput = "false"
+local stopAfter = 20
 
 -- Define an empty string if no packages need to be installed.
 local installPythonPackagesList = "''"
@@ -557,6 +562,8 @@ local function setPyodideOptionsFromSettings(meta)
   homeDir = text("home-dir") or homeDir
   showStartUpMessage = tostring(onOff("show-startup-message", true))
   preloadPackages = tostring(onOff("preload-packages", true))
+  stopAfter = ctm.runtime.stopAfter("pyodide")
+  examOutput = tostring(S.choice("pyodide", "output-mode", {"rich", "exam"}, {default = "rich"}) == "exam")
   -- Feedback is on unless pyodide: feedback: false, and only in builds with
   -- AI feedback (P22, asked directly: no dependence on the filter order). An
   -- explicit pyodide: feedback: true on a page with cells is a request, which
@@ -639,6 +646,8 @@ local function initializationPyodide()
     ["HOMEDIR"] = jsStringEscape(homeDir),
     ["SHOWSTARTUPMESSAGE"] = showStartUpMessage,
     ["PRELOADPACKAGES"] = preloadPackages,
+    ["EXAMOUTPUT"] = examOutput,
+    ["STOPAFTER"] = tostring(stopAfter),
     ["INSTALLPYTHONPACKAGESLIST"] = installPythonPackagesList,
     ["QPYODIDECELLDETAILS"] = cellDetails,
     ["FEEDBACKENABLED"] = feedbackEnabled,
@@ -723,7 +732,7 @@ local function ensurePyodideSetup()
   -- and cannot register itself; Python works without it (Stop restarts the
   -- worker -- see Known limitations).
   ctm.layout.use()
-  ctm.runtime.worker()
+  ctm.runtime.page()
 
   local initializedConfigurationPyodide = initializationPyodide()
 
@@ -777,6 +786,7 @@ local function ensurePyodideSetup()
   end
   ctm.deps.html({
     name = "pyodide-interaktiv",
+    resources = {quarto.utils.resolve_path("qpyodide-worker-module.js")},
     version = extensionVersion(),
     stylesheets = {quarto.utils.resolve_path("qpyodide-styling.css")},
     scripts = {
@@ -1607,7 +1617,7 @@ local function finalizePendingCell(entry)
   if entry.options.context ~= "setup" then
     -- Keep the runtime/worker ahead of the locale dependencies registered by
     -- the shared store. Full document setup still waits for stitchDocument().
-    ctm.runtime.worker()
+    ctm.runtime.page()
     local primarySave = save
     if not interactive or entry.options["read-only"] == "true" then primarySave = false end
     local record = ctm.ui.exercise({component = "pyodide-interaktiv", id = id, source = source, save = primarySave})
