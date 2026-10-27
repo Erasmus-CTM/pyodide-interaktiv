@@ -1,12 +1,13 @@
 -- ctm-libs, the library of CTM Assessment: the one next to this extension,
 -- in the CTM Assessment package or in the copy this extension ships
--- (`quarto add Erasmus-CTM/pyodide-interaktiv` installs it). ctm.feedback is
+-- (`quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration` installs it; the default
+-- branch is still 1.6, without ctm-libs, until step 8). ctm.feedback is
 -- touched only inside the filter functions (step-3 design §18.4).
 local ctm = dofile(quarto.utils.resolve_path("ctm-bootstrap.lua"))("pyodide-interaktiv",
-  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv", api = 3})
+  {standalone = "quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration", api = 3})
 local feedback = nil
 local INSTALL = "quarto add https://erasmus-ctm.github.io/ctm-assessment/ctm-assessment.tar.gz"
-local STANDALONE = "quarto add Erasmus-CTM/pyodide-interaktiv"
+local STANDALONE = "quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration"
 local function requireAssets()
   if type(ctm.runtime.page) ~= "function" then
     ctm.fail("P13 requires an updated CTM Assessment page-worker runtime. Reinstall CTM Assessment: " .. INSTALL)
