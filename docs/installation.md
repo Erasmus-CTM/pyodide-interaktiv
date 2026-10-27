@@ -24,10 +24,10 @@ Projects that commit `_extensions/`, or allow only
 `_extensions/Erasmus-CTM/pyodide-interaktiv` in `.gitignore` (for example
 `!_extensions/*/*/*`), add `ctm-libs` and `ai-feedback` too: without
 ctm-libs next to the extension the render stops with
-`Install pyodide-interaktiv again: quarto add Erasmus-CTM/pyodide-interaktiv`.
+`Install pyodide-interaktiv again: quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration`.
 
 **Projects set up for 1.8 or earlier** kept an `ai-feedback` 0.8.1 folder.
-`quarto add Erasmus-CTM/pyodide-interaktiv` replaces it with the forwarder:
+`quarto add Erasmus-CTM/pyodide-interaktiv@feature/shared-feedback-integration` replaces it with the forwarder:
 `filters: [ai-feedback, ...]` keeps working, with one warning (list only
 `Erasmus-CTM/pyodide-interaktiv`). A page that lists a 0.8.1 folder that was
 not replaced stops with "remove ai-feedback from filters: and delete the old

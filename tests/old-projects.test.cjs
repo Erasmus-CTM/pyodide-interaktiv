@@ -62,7 +62,7 @@ test('copied by hand without ctm-libs, the render names the install command', { 
   try {
     const r = render(dir);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /pyodide-interaktiv needs its library ctm-libs, which is missing next to it\. Install pyodide-interaktiv again: quarto add Erasmus-CTM\/pyodide-interaktiv/);
+    assert.match(r.stderr, /pyodide-interaktiv needs its library ctm-libs, which is missing next to it\. Install pyodide-interaktiv again: quarto add Erasmus-CTM\/pyodide-interaktiv@feature\/shared-feedback-integration/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
