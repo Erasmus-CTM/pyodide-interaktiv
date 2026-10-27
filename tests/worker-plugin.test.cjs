@@ -26,9 +26,26 @@ function fakePyodide({setupFails = false} = {}) {
     if (code === '"<b>bold</b>"') return '<b>bold</b>';
     return undefined;
   };
-  fake.globals = {get: () => { const f = () => ({toJs: () => [['PNG'], [], [], [], []], destroy() {}}); f.destroy = () => {}; return f; }};
+  fake.globals = {set() {}, get: () => { const f = () => ({toJs: () => [['PNG'], [], [], [], []], destroy() {}}); f.destroy = () => {}; return f; }};
   return fake;
 }
+
+test('exam output keeps returned HTML as text and never requests plot pickles', async () => {
+  const py = fakePyodide(), requests = [];
+  py.loadedPackages.matplotlib = 'default channel';
+  const original = py.globals.get;
+  py.globals.get = name => {
+    const collect = original(name);
+    const tracked = wantPickle => { requests.push(wantPickle); return collect(wantPickle); };
+    tracked.destroy = () => {};
+    return tracked;
+  };
+  const p = plugin(py);
+  const result = await p.registered.commands.runCell({code: '"<b>bold</b>"', wantPickle: true, examOutput: true});
+  assert.equal(result.html, null);
+  assert.deepEqual(result.entries.map(e => e.message), ['<b>bold</b>']);
+  assert.deepEqual(requests, [false]);
+});
 
 test('stage 1: the input() hook sets the prompt through the worker\'s setPrompt', () => {
   const p = plugin(fakePyodide());
@@ -50,7 +67,7 @@ test('runCell: the plot setup once, at the first run; output, HTML and figures a
   assert.deepEqual(py.ran.filter(c => c === 'PY_SETUP'), ['PY_SETUP']);
   result = await p.registered.commands.runCell({code: 'raise'});
   assert.deepEqual(result.entries.map(e => e.type), ['stderr']);
-  assert.deepEqual(JSON.parse(JSON.stringify(p.posted)), [{type: 'streamStderr', text: 'Error: Traceback: ValueError'}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.posted)), [], 'errors use owned capture, never an unowned stream');
 });
 
 test('a failed plot setup: cells run without figure collection, and it is tried again once matplotlib is there (N4)', async () => {

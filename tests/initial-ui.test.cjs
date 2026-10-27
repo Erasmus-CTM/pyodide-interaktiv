@@ -9,7 +9,7 @@ const method=source.slice(start,end).replace('  initMonaco() {','function initMo
 test('initial editors register their AMD work; user-added extra editors still initialize after the barrier closes',()=>{
   for(const initial of [true,false]) {
     const callbacks=[],tracked=[];
-    const root={qpyodideBuildingInitialUI:initial,MathExerciseRuntime:{trackInitialUI(p){if(!initial)throw new Error('barrier closed');tracked.push(p);}}};
+    const root={qpyodideBuildingInitialUI:initial,MathExerciseRuntime:{prepareMonacoClipboard(){},trackInitialUI(p){if(!initial)throw new Error('barrier closed');tracked.push(p);}}};
     const run=new Function('globalThis','require','qpyodideBuildingInitialUI','unit',method+';return initMonaco.call(unit);');
     run(root,(deps,callback)=>callbacks.push(callback),initial,{});
     assert.equal(callbacks.length,1,'the real AMD construction path remains active');
@@ -33,7 +33,7 @@ test('initial editor readiness rejects actual AMD, construction and layout failu
   for(const stage of ['amd','create','layout']) {
     const error=new Error(stage+' failed'),tracked=[];
     let callback,amdFailure;
-    const root={qpyodideBuildingInitialUI:true,MathExerciseRuntime:{trackInitialUI:p=>tracked.push(p)}};
+    const root={qpyodideBuildingInitialUI:true,MathExerciseRuntime:{prepareMonacoClipboard(){},trackInitialUI:p=>tracked.push(p)}};
     const editor={getModel:()=>({setEOL(){}}),createContextKey(){},onDidFocusEditorText(){},onDidChangeModelContent(){}};
     const monaco={editor:{create(){if(stage==='create')throw error;return editor;},EndOfLineSequence:{LF:0}}};
     const win={CTMLayout:{fitEditor(){throw error;}}};

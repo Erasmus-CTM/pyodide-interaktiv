@@ -131,7 +131,7 @@ globalThis.qpyodideStartupPhaseDone = false;
  *   images     – the remaining matplotlib figures as base64 PNGs,
  *   pickles    – the same figures as base64 pickle (empty without wantPickle)
  */
-async function qpyodideExecutePython(code, wantPickle) {
+async function qpyodideExecutePython(code, wantPickle, handlers) {
   const pyodide = await qpyodideReady;
   // This extension's cells run once the extra packages are there (D2), or
   // without them when they failed; they wait here, before the worker's
@@ -142,7 +142,13 @@ async function qpyodideExecutePython(code, wantPickle) {
   } catch (err) {
     if (err && err.restarted) throw err;
   }
-  const result = await pyodide.runCell(code, wantPickle);
+  const result = await MathExerciseRuntime.transaction(pyodide,
+    async () => {
+      await pyodide.prepareCell(code);
+      handlers?.onRunning?.();
+      return pyodide.runCell(code, globalThis.qpyodideExamOutput ? false : wantPickle,
+        globalThis.qpyodideExamOutput === true);
+    }, handlers);
   result.text = result.entries.map((entry) => entry.message).join("\n");
   return result;
 }
@@ -223,7 +229,7 @@ function qpyodideRenderPlots(targetDiv, result, options) {
   const pickles = result.pickles || [];
   if (images.length === 0) return;
   if (result.html) return;
-  if (!globalThis.qpyodideCanvasWanted?.(options)) return;
+  if (globalThis.qpyodideExamOutput || !globalThis.qpyodideCanvasWanted?.(options)) return;
 
   if (pickles.length !== images.length || pickles.some((p) => !p)) {
     // At least one figure couldn't be pickled -> stick with the image,
@@ -245,6 +251,10 @@ function qpyodideRenderPlots(targetDiv, result, options) {
  * already be attached to the document for this.
  */
 async function qpyodideRenderHtmlOutput(targetDiv, html) {
+  if (globalThis.qpyodideExamOutput) {
+    const pre = document.createElement('pre'); pre.textContent = html;
+    targetDiv.appendChild(pre); return;
+  }
   const wrapper = document.createElement("div");
   wrapper.className = "qpyodide-html-output";
   targetDiv.appendChild(wrapper);
@@ -636,6 +646,7 @@ class EditorUnit {
     const initialUI = new Promise((resolve, reject) => {
       require(["vs/editor/editor.main"], function () {
         try {
+        globalThis.MathExerciseRuntime.prepareMonacoClipboard();
         thiz.editor = monaco.editor.create(thiz.editorDiv, {
           // Restored, saved code (if any) takes the editor's initial value --
           // the original course code stays available via __qpyodideinitialCode
@@ -919,14 +930,16 @@ class EditorUnit {
     this.outputCodeDiv.classList.add("has-content");
 
     // Streamed stdout/stderr: each line appears immediately in the terminal
-    proxy.onStream = (text, type) => {
-      const line = document.createElement("code");
-      line.className = type === "stderr"
+    const onStream = (text, type) => {
+      const className = type === "stderr"
         ? "qpyodide-output-code-stderr"
         : "qpyodide-output-code-stdout";
-      line.textContent = text;
-      terminalDiv.appendChild(line);
-      terminalDiv.appendChild(document.createTextNode("\n"));
+      let line = terminalDiv.lastChild;
+      if (!line || line.nodeType !== 1 || line.className !== className) {
+        line = document.createElement("code"); line.className = className;
+        terminalDiv.appendChild(line);
+      }
+      line.appendChild(document.createTextNode(text + "\n"));
     };
 
     // Python input(): insert an input field inline into the terminal and
@@ -935,7 +948,7 @@ class EditorUnit {
     // from Python), since Pyodide only flushes stdout on complete lines
     // (with \n) – input() prompts without \n would otherwise never reach
     // the main thread.
-    proxy.onInputRequired = (prompt) => {
+    const onInputRequired = (prompt) => {
       const row = document.createElement("div");
       row.className = "qpyodide-input-row";
 
@@ -958,6 +971,12 @@ class EditorUnit {
       inp.addEventListener("keydown", (e) => {
         if (e.key !== "Enter") return;
         const val = inp.value;
+        try { proxy.provideInput(val); } catch (error) {
+          inp.setCustomValidity(CTMLocales.table("common", globalThis.qpyodideLang || "en").inputTooLong || String(error.message || error));
+          inp.reportValidity();
+          return;
+        }
+        inp.setCustomValidity("");
         // Replace the input field with the echo (the prompt label stays)
         const echo = document.createElement("code");
         echo.className = "qpyodide-output-code-stdout qpyodide-input-echo";
@@ -965,10 +984,19 @@ class EditorUnit {
         inp.replaceWith(echo);
         terminalDiv.appendChild(document.createTextNode("\n"));
         // Hand the value to the worker (wakes Atomics.wait in stdin())
-        proxy.provideInput(val);
       });
     };
 
+    const common = CTMLocales.table("common", globalThis.qpyodideLang || "en");
+    let cancelSlow = () => {}, slowNote = null;
+    const onRunning = () => {
+      cancelSlow = MathExerciseRuntime.whenSlow((globalThis.qpyodideStopAfter || 20) * 1000, () => {
+        slowNote = document.createElement("div");
+        slowNote.setAttribute("role", "status");
+        slowNote.textContent = common.pythonSlow;
+        terminalDiv.appendChild(slowNote);
+      }, {runtime: proxy});
+    };
     // Turn the Run button into a Stop button
     const runButtonHtml = this.runButton.innerHTML;
     this.runButton.innerHTML = QP_L.stopLabel;
@@ -984,17 +1012,14 @@ class EditorUnit {
         aborted.textContent = QP_L.aborted;
         row.replaceChildren(aborted);
       });
-      if (proxy.interruptBuffer) {
-        proxy.interrupt();
-      } else {
-        proxy.restart(QP_L.abortedRestart);
-      }
+      MathExerciseRuntime.stop(common.stopped);
+
     };
 
     let text = "";
     try {
       const result = await qpyodideExecutePython(
-        code, globalThis.qpyodideCanvasWanted?.(this.options)
+        code, globalThis.qpyodideCanvasWanted?.(this.options), {onStream, onInputRequired, onRunning}
       );
       text = result.text;
       if (outputRevision !== this.outputRevision) return text;
@@ -1018,13 +1043,14 @@ class EditorUnit {
       // Hard abort (worker restart) or worker crash
       evidence = [];
       if (outputRevision !== this.outputRevision) return '';
-      text = String((err && err.message) || err);
+      text = err?.restarted ? QP_L.abortedRestart : err?.cancelled ? common.stopped : String((err && err.message) || err);
       terminalDiv.querySelectorAll(".qpyodide-input-row").forEach((r) => r.remove());
       const errCode = document.createElement("code");
       errCode.className = "qpyodide-output-code-stderr";
       errCode.textContent = text;
       terminalDiv.appendChild(errCode);
     } finally {
+      cancelSlow(); slowNote?.remove();
       proxy.onStream = null;
       proxy.onInputRequired = null;
       proxy.clearInterrupt();

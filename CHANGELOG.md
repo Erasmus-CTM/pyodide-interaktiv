@@ -2,6 +2,9 @@
 
 ## 1.10.0 — Shared saved cells (phase B6)
 
+- Exam windows and WebKit pages without the asynchronous clipboard API skip
+  Monaco's proactive clipboard-write workaround. Normal copy and the shared
+  selectable-text fallback remain available without uncaught clipboard errors.
 - Editable cells use ctm-libs' shared answer store. Saving is on by default;
   `save: none` and per-cell `#| save: false` turn it off. Explicit legacy
   `local-storage` options remain aliases. The shared page bar owns course

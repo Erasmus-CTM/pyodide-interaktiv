@@ -27,7 +27,7 @@ const CELLS = [
 
 // A page as qpyodide.lua writes it: the settings, ctm-libs' catalogue and
 // worker, then this extension's modules in their order.
-function page({cells = CELLS, isolated = false, preloadPackages = true, packages = [''], coiOutcome = 'unavailable', initialUI = Promise.resolve()} = {}) {
+function page({cells = CELLS, isolated = false, preloadPackages = true, packages = [''], coiOutcome = 'unavailable', initialUI = Promise.resolve(), stopAfter = 20} = {}) {
   const dom = new JSDOM('<header id="title-block-header"></header><main>'
     + cells.map(cell => `<div id="qpyodide-insertion-location-${cell.id}"></div>`).join('') + '</main>',
   {url: 'https://course.invalid/page.html', runScripts: 'outside-only'});
@@ -35,7 +35,10 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   const workers = [];
   class FakeWorker {
     constructor(url, options) { this.options = options; this.posted = []; this.terminated = false; workers.push(this); }
-    postMessage(message) { this.posted.push(message); }
+    postMessage(message) {
+      this.posted.push(message);
+      if (['beginOperation','endOperation','prepareCell'].includes(message.type)) queueMicrotask(() => this.reply({type:'result',id:message.id,value:true}));
+    }
     terminate() { this.terminated = true; }
     reply(data) { this.onmessage({data}); }
     // Answers the n-th command of a type (default: the last one).
@@ -50,12 +53,13 @@ function page({cells = CELLS, isolated = false, preloadPackages = true, packages
   w.URL.revokeObjectURL = () => {};
   w.crossOriginIsolated = isolated;
   w.qpyodideCoiOutcome = coiOutcome;
-  w.MathExerciseRuntime = {whenInitialUIReady: () => initialUI};
+  w.eval(fs.readFileSync(path.join(libs, 'runtime/pyodide-runtime.js'), 'utf8'));
+  w.MathExerciseRuntime.whenInitialUIReady = () => initialUI;
   w.console = {log() {}, warn() {}, error() {}, info() {}};
   // The settings script (qpyodide-document-settings.js, rendered).
   Object.assign(w, {
     qpyodideInstallPythonPackagesList: packages, qpyodideSetupPythonPackages: !packages.includes(''), qpyodideShowStartupMessage: true,
-    qpyodidePreloadPackages: preloadPackages,
+    qpyodidePreloadPackages: preloadPackages, qpyodideStopAfter: stopAfter,
     qpyodideCustomizedPyodideOptions: {indexURL: 'https://cdn.example/pyodide/v0.28.3/full/', env: {HOME: '/home/pyodide'}},
     qpyodideCanvasBackend: 'webagg', qpyodideLang: 'en', qpyodideCellDetails: cells,
     qpyodideFeedbackOptions: {enabled: false, storage: 'session', hints: true, uiLanguage: 'en'},
@@ -385,4 +389,66 @@ test('fatal worker error during package setup keeps Run disabled and reports eng
   p.workers[0].onerror({message:'worker crashed'});await tick();
   assert.equal(p.w.qpyodideCellsReady,false);assert.ok(p.runButtons().every(b=>b.disabled));
   assert.match(p.status(),/worker crashed/);assert.equal(p.workers.length,1);p.w.close();
+});
+
+
+test('IDE stop-after starts after preparation and keeps the immediate Stop control', async () => {
+  const p = page({cells:[{id:1,code:'while True: pass',options:{context:'interactive',autorun:false}}],preloadPackages:false,stopAfter:0.01});
+  const worker=p.workers[0];
+  await p.stage1(0);worker.reply({type:'setup',ok:true});await tick();
+  p.runButtons()[0].click();await tick();await tick();
+  assert.equal(p.runCells(worker).length,1);
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.match(p.w.document.querySelector('.qpyodide-output-code-area').textContent,/Python is still running/);
+  assert.match(p.runButtons()[0].textContent,/Stop/);
+  worker.answer('runCell',{entries:[],images:[]});await tick();await tick();
+  assert.doesNotMatch(p.w.document.querySelector('.qpyodide-output-code-area').textContent,/Python is still running/);
+  p.w.close();
+});
+
+test('failed initial startup retries explicitly and keeps one status owner', async () => {
+  const p=page({cells:[CELLS[0]],preloadPackages:false});
+  const init=p.workers[0].posted.find(m=>m.type==='init');
+  p.workers[0].reply({type:'error',id:init.id,message:'blocked startup'});await tick();await tick();
+  assert.equal(p.w.qpyodideCellsReady,false);
+  const retry=[...p.w.document.querySelectorAll('.ctm-python-status button')].find(b=>b.textContent==='Retry');
+  assert.ok(retry&&!retry.hidden);retry.click();
+  assert.equal(p.workers.length,2);
+  await p.stage1(1);p.workers[1].reply({type:'setup',ok:true});await tick();await tick();
+  assert.equal(p.w.qpyodideCellsReady,true);assert.ok(p.runButtons().every(b=>!b.disabled));
+  assert.equal(p.w.document.querySelectorAll('.ctm-python-status').length,1);p.w.close();
+});
+
+test('fatal failure after Ready offers Retry and replays authored startup exactly once', async () => {
+  const p=page({preloadPackages:false});await p.stage1(0);p.workers[0].reply({type:'setup',ok:true});await tick();await drain(p.workers[0]);
+  p.workers[0].onerror({message:'fatal after Ready'});await tick();
+  assert.equal(p.w.qpyodideCellsReady,false);assert.ok(p.runButtons().every(b=>b.disabled));
+  const retry=[...p.w.document.querySelectorAll('.ctm-python-status button')].find(b=>b.textContent==='Retry');
+  assert.ok(retry&&!retry.hidden);retry.click();assert.equal(p.workers.length,2);
+  await p.stage1(1);p.workers[1].reply({type:'setup',ok:true});await tick();await drain(p.workers[1]);
+  assert.deepEqual(p.runCells(p.workers[1]),['SETUP_VALUE = 5','print("OUT", SETUP_VALUE)','print("LATER")']);
+  assert.equal(p.w.qpyodideCellsReady,true);assert.equal(p.w.document.querySelectorAll('.ctm-python-status').length,1);p.w.close();
+});
+
+test('fatal failure then replacement import failure can Retry again without replaying failed starts', async () => {
+  const p=page({preloadPackages:false});await p.stage1(0);p.workers[0].reply({type:'setup',ok:true});await tick();await drain(p.workers[0]);
+  const retry=()=>[...p.w.document.querySelectorAll('.ctm-python-status button')].find(b=>b.textContent==='Retry');
+  p.workers[0].onerror({message:'fatal'});await tick();assert.equal(p.workers.length,1);
+  retry().click();assert.equal(p.workers.length,2);
+  const init=p.workers[1].posted.find(m=>m.type==='init');p.workers[1].reply({type:'error',id:init.id,message:'plugin import failed'});await tick();await tick();
+  assert.ok(!retry().hidden);assert.equal(p.workers.length,2,'no automatic restart');
+  retry().click();assert.equal(p.workers.length,3);
+  await p.stage1(2);p.workers[2].reply({type:'setup',ok:true});await tick();await drain(p.workers[2]);
+  assert.deepEqual(p.runCells(p.workers[1]),[],'failed replacement never ran authored code');
+  assert.deepEqual(p.runCells(p.workers[2]),['SETUP_VALUE = 5','print("OUT", SETUP_VALUE)','print("LATER")']);
+  assert.equal(p.w.qpyodideCellsReady,true);assert.equal(p.w.document.querySelectorAll('.ctm-python-status').length,1);p.w.close();
+});
+
+test('repeated initial failures remain explicitly retryable with one status owner', async () => {
+ const p=page({cells:[CELLS[0]],preloadPackages:false});
+ for(let n=0;n<2;n++){
+  const init=p.workers[n].posted.find(m=>m.type==='init');p.workers[n].reply({type:'error',id:init.id,message:'initial failure '+n});await tick();await tick();
+  assert.equal(p.workers.length,n+1);const retry=[...p.w.document.querySelectorAll('.ctm-python-status button')].find(b=>b.textContent==='Retry');assert.ok(retry&&!retry.hidden);retry.click();
+ }
+ await p.stage1(2);p.workers[2].reply({type:'setup',ok:true});await tick();await tick();assert.equal(p.w.qpyodideCellsReady,true);assert.equal(p.w.document.querySelectorAll('.ctm-python-status').length,1);p.w.close();
 });

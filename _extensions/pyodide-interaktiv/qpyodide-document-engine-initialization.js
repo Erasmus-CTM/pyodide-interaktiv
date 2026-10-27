@@ -104,7 +104,10 @@ async function qpyodideFollowWorker(started, afterRestart) {
 }
 
 function qpyodideStartWorker() {
-  return CTMWorker.start({
+  const script = document.querySelector?.('script[src$="/qpyodide-document-engine-initialization.js"]');
+  const pluginURLs = script ? [new URL('qpyodide-worker-module.js', script.src).href] : [];
+
+  return CTMWorker.page({
   indexURL: qpyodideCustomizedPyodideOptions.indexURL,
   // MPLBACKEND: a check that imports matplotlib before the plot setup gets
   // the backend the plot setup would set.
@@ -115,8 +118,12 @@ function qpyodideStartWorker() {
     // Shim requests/urllib3 (synchronous XHR is allowed in the worker)
     run: "import pyodide_http\npyodide_http.patch_all()"
   },
-  plugin: QPYODIDE_WORKER_PLUGIN,
-  commands: { runCell: ["code", "wantPickle"] },
+  pluginURLs,
+  plugin: pluginURLs.length ? undefined : QPYODIDE_WORKER_PLUGIN,
+  examOutput: globalThis.qpyodideExamOutput === true,
+  stopAfter: globalThis.qpyodideStopAfter || 20,
+  showStatus: globalThis.qpyodideShowStartupMessage !== false,
+  commands: { prepareCell: ["code"], runCell: ["code", "wantPickle", "examOutput"] },
   // Translated status texts for the worker (it doesn't know QP_L)
   messages: {
     loading:       QP_L.workerLoading,
@@ -124,6 +131,11 @@ function qpyodideStartWorker() {
     extraPackages: QP_L.workerExtraPackages
   },
   onStatus: (text) => qpyodideUpdateStatusHeaderSpinner(text),
+  onFailure: (error) => {
+    globalThis.qpyodideCellsReady = false;
+    qpyodideSetInteractiveButtonState(QP_L.runLoading, false);
+    qpyodideUpdateStatusHeader(QP_L.engineFailed(error.message));
+  },
   onRestart: (again) => {
     qpyodideFollowWorker(again, true).catch((err) => console.error("qpyodide: restart failed", err));
   },
