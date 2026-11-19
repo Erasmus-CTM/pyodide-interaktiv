@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       library:
-        description: 'Exact reviewed ctm-libs commit (40 hex); empty uses the target/source record'
+        description: 'Exact reviewed ctm-libs commit (40 hex); empty uses the source record'
         required: false
         default: ''
 permissions:
@@ -29,8 +29,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          target = pathlib.Path('.github/ctm-libs-target.json')
-          record = target if target.is_file() else pathlib.Path('.github/ctm-libs-source.json')
+          record = pathlib.Path('.github/ctm-libs-source.json')
           value = os.environ.get('REQUESTED_LIBRARY') or json.loads(record.read_text())['commit']
           if not re.fullmatch('[0-9a-f]{40}', value):
               raise SystemExit('The library must be an exact 40-hex commit.')

@@ -25,9 +25,10 @@ do
   _G.__ctmAiFeedbackInstallation = loaded or {path = here, version = ctm.version}
 end
 
--- P22: a build without AI feedback. Off when CTM_FEEDBACK=off or when
--- ai-feedback: enabled resolves to false (any level, the merged metadata;
--- no level can turn it back on). Policies are still read and validated, so
+-- P22: a build without AI feedback. Off when CTM_FEEDBACK=off, in an exam
+-- build (ctm-assessment: exam: true at any level) or when ai-feedback:
+-- enabled resolves to false (any level, the merged metadata; no level can
+-- turn it back on). Policies are still read and validated, so
 -- both builds fail alike; nothing of AI feedback reaches the HTML.
 local switch = nil
 -- One build message per page: its exercises that only AI feedback can
@@ -99,7 +100,10 @@ function M.enabled()
     if html then
       -- Stops when the page's settings were not loaded (a component bug).
       entry = ctm.settings.entry("ai-feedback", "enabled")
-      if entry and entry.value == false then
+      local exam = ctm.settings.entry("ctm-assessment", "exam")
+      if exam and exam.value == true then
+        switch = {on = false, reason = "ctm-assessment: exam: true (" .. tostring(exam.origin) .. ")"}
+      elseif entry and entry.value == false then
         switch = {on = false, reason = "ai-feedback: enabled: false (" .. tostring(entry.origin) .. ")"}
       end
     end
@@ -234,6 +238,11 @@ local function activity(block, context)
   local task = table.concat(taskParts, "\n\n")
   if task == "" then task = profile == "translation" and "Translate the supplied source into the response language." or "Give feedback on the learner's response." end
   local contextMode = attrs["context"] == "none" and "none" or (attrs["context"] and attrs["context"] ~= "auto" and "explicit" or "auto")
+  local corrections = attrs["corrections"] == "true"
+  if corrections and attrs["image-upload"] ~= "true" then
+    quarto.log.warning("AI feedback " .. id .. ': corrections="true" requires image-upload="true"; corrections disabled.')
+    corrections = false
+  end
   local data = {
     id = id, policySelection = policy.selection(block, attrs), profile = profile, task = task, materials = materials, criteria = criteria,
     uiLanguage = attrs["ui-language"] and ctm.locale.language("feedback", attrs["ui-language"]) or uiLanguage,
@@ -242,6 +251,7 @@ local function activity(block, context)
     sourceLanguage = attrs["source-language"] or "", sourceRef = attrs["source"],
     learnerLevel = attrs["learner-level"] or "", starter = starter,
     resetOnVariant = attrs["reset-on-variant"],
+    corrections = corrections,
     imageUpload = attrs["image-upload"] == "true", imageRole = attrs["image-role"] or "response",
     contextMode = contextMode, contextRefs = attrs["context"] or "",
     context = contextMode ~= "none" and bounded(context, contextMode == "explicit") or "",
