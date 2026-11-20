@@ -2,7 +2,7 @@
 
 ## Unreleased (2.0.0 with step 8)
 
-- The shipped ctm-libs is the CTM Assessment 1.0 review head (bounded AI
+- The shipped ctm-libs is the CTM Assessment 1.0 review head fbb721e (bounded AI
   feedback streams, `ctm-assessment: exam`, the STACK local-build stop, one
   installation per page by code identity). The stale
   `.github/ctm-libs-target.json` is gone; the report reads the source record.
